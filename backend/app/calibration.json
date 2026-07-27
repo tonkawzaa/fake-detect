@@ -1,0 +1,59 @@
+{
+  "ai_ensemble": {
+    "weights": {
+      "community-forensics-384": 0.5012768372268986,
+      "siglip2-giant-linear-probe": 0.4987231627731013
+    },
+    "platt": {
+      "a": 1.9771700846968567,
+      "b": 4.715794077906349
+    },
+    "threshold": 0.5,
+    "per_model_auc": {
+      "community-forensics-384": 0.995049504950495,
+      "siglip2-giant-linear-probe": 0.9925275546422567
+    },
+    "accuracy": 0.9951690821256038,
+    "auc": 0.9999065944330282,
+    "n": 207,
+    "out_of_fold": true,
+    "per_generator": {
+      "ffhq": 0.99,
+      "imagenet": 1.0,
+      "stable_cascade": 1.0,
+      "stylegan": 1.0
+    }
+  },
+  "beauty": {
+    "thresholds": {
+      "f1_skin_hf_ratio": [
+        2.8778673970541613,
+        4.947190008481068
+      ],
+      "f2_noise_residual": [
+        1.453315116573176,
+        0.34558364502108346
+      ],
+      "f3_lbp_entropy_drop": [
+        0.056521700237594695,
+        0.036969816151345807
+      ],
+      "f4_fft_highfreq": [
+        0.0005900165701264247,
+        0.0008877895945422002
+      ],
+      "f6_tone_uniformity": [
+        0.35357677019516154,
+        0.10461788324788317
+      ],
+      "f8_contour_warp": [
+        0.0,
+        0.045841528145326875
+      ]
+    },
+    "source": "synthetic_bootstrap",
+    "n_on": 79,
+    "n_off": 79,
+    "separation_check": "off mean=0.486, on mean=0.598"
+  }
+}
