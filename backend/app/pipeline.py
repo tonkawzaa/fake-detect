@@ -24,7 +24,7 @@ from .detectors.heatmap import compute_saliency_map, render_overlay_png_base64
 from .detectors.reconstruction import get_reconstruction_detector
 from .detectors.registry import build_ensemble
 from .forensics.credentials import read_c2pa
-from .forensics.metadata import read_exif
+from .forensics.metadata import read_exif, read_xmp
 from .schemas import (
     AnalyzeReport,
     BeautyOut,
@@ -123,6 +123,45 @@ def analyze_image(image_bytes: bytes) -> AnalyzeReport:
         models_out = []
         verdict, ai_probability, confidence_band, calibrated = "uncertain", None, "low", False
 
+    # --- provenance ---------------------------------------------------
+    # Computed here (ahead of the reconstruction-error gate below) because a
+    # C2PA manifest -- or a bare XMP `Iptc4xmpExt:DigitalSourceType` tag,
+    # see app/forensics/metadata.py's module docstring -- naming a
+    # generative-AI producer is treated as near-conclusive and overrides the
+    # ensemble's verdict outright, so an "uncertain" ensemble verdict on a
+    # provably-AI image shouldn't still trigger the expensive AEROBLADE
+    # secondary check below. C2PA is checked first: it's cryptographically
+    # signed, whereas a bare XMP tag is just rewritable metadata with no
+    # such guarantee.
+    provenance_out = None
+    verdict_source = "ensemble"
+    try:
+        exif = read_exif(image_bytes)
+        c2pa = read_c2pa(image_bytes)
+        xmp = read_xmp(image_bytes)
+        provenance_out = ProvenanceOut(
+            exif_present=exif.exif_present,
+            camera_make=exif.camera_make,
+            camera_model=exif.camera_model,
+            software=exif.software,
+            flagged_editor_software=exif.flagged_editor,
+            c2pa_present=c2pa.present,
+            c2pa_claim_generator=c2pa.claim_generator,
+            c2pa_is_generative_ai=c2pa.is_generative_ai,
+            c2pa_actions=c2pa.actions,
+            xmp_present=xmp.present,
+            xmp_digital_source_type=xmp.digital_source_type,
+            xmp_is_generative_ai=xmp.is_generative_ai,
+        )
+        if c2pa.is_generative_ai:
+            verdict, ai_probability, confidence_band = "likely_ai", 1.0, "high"
+            verdict_source = "c2pa"
+        elif xmp.is_generative_ai:
+            verdict, ai_probability, confidence_band = "likely_ai", 1.0, "high"
+            verdict_source = "xmp"
+    except Exception:
+        logger.exception("Provenance extraction failed")
+
     # --- reconstruction-error secondary check (only when the ensemble is
     # uncertain -- see app/detectors/reconstruction.py's module docstring
     # for why this is deliberately not just another ensemble member) ------
@@ -183,31 +222,13 @@ def analyze_image(image_bytes: bytes) -> AnalyzeReport:
     except Exception:
         logger.exception("Beauty engine failed")
 
-    # --- provenance -------------------------------------------------------
-    provenance_out = None
-    try:
-        exif = read_exif(image_bytes)
-        c2pa = read_c2pa(image_bytes)
-        provenance_out = ProvenanceOut(
-            exif_present=exif.exif_present,
-            camera_make=exif.camera_make,
-            camera_model=exif.camera_model,
-            software=exif.software,
-            flagged_editor_software=exif.flagged_editor,
-            c2pa_present=c2pa.present,
-            c2pa_claim_generator=c2pa.claim_generator,
-            c2pa_is_generative_ai=c2pa.is_generative_ai,
-            c2pa_actions=c2pa.actions,
-        )
-    except Exception:
-        logger.exception("Provenance extraction failed")
-
     return AnalyzeReport(
         status="ok",
         message="ok",
         verdict=verdict,
         ai_probability=ai_probability,
         confidence_band=confidence_band,
+        verdict_source=verdict_source,
         calibrated=calibrated,
         models=models_out,
         model_accuracy=_model_accuracy_out(calibration),

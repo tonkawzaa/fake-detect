@@ -73,6 +73,9 @@ class ProvenanceOut(BaseModel):
     c2pa_claim_generator: str | None = None
     c2pa_is_generative_ai: bool = False
     c2pa_actions: list[str] = []
+    xmp_present: bool = False
+    xmp_digital_source_type: str | None = None
+    xmp_is_generative_ai: bool = False
 
 
 class AnalyzeReport(BaseModel):
@@ -82,6 +85,7 @@ class AnalyzeReport(BaseModel):
     ai_probability: float | None = None
     confidence_band: str | None = None
     calibrated: bool = False
+    verdict_source: str = "ensemble"  # "ensemble" | "c2pa" -- see pipeline.py
     models: list[ModelScoreOut] = []
     model_accuracy: ModelAccuracyOut | None = None
     beauty: BeautyOut | None = None

@@ -26,10 +26,25 @@ export function VerdictCard({ report }: { report: AnalyzeReport }) {
             {verdict.label}
           </span>
           {report.confidence_band && <span className="text-sm text-muted">{BAND_COPY[report.confidence_band]}</span>}
-          {!report.calibrated && (
-            <span className="text-xs text-warn">
-              Uncalibrated ensemble average — run scripts/evaluate.py to calibrate this probability.
+          {report.verdict_source === "c2pa" ? (
+            <span className="text-xs text-muted">
+              Forced by C2PA content credentials
+              {report.provenance?.c2pa_claim_generator ? ` (${report.provenance.c2pa_claim_generator})` : ""} declaring
+              this as generative AI — the model ensemble below was not the deciding factor.
             </span>
+          ) : report.verdict_source === "xmp" ? (
+            <span className="text-xs text-muted">
+              Forced by an IPTC digitalSourceType tag in the image&apos;s XMP metadata
+              {report.provenance?.xmp_digital_source_type ? ` (${report.provenance.xmp_digital_source_type})` : ""} declaring
+              this as generative AI — unlike C2PA this isn&apos;t cryptographically signed, just metadata, but the model
+              ensemble below was not the deciding factor.
+            </span>
+          ) : (
+            !report.calibrated && (
+              <span className="text-xs text-warn">
+                Uncalibrated ensemble average — run scripts/evaluate.py to calibrate this probability.
+              </span>
+            )
           )}
         </div>
       </div>

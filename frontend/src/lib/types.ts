@@ -61,6 +61,9 @@ export interface ProvenanceOut {
   c2pa_claim_generator: string | null;
   c2pa_is_generative_ai: boolean;
   c2pa_actions: string[];
+  xmp_present: boolean;
+  xmp_digital_source_type: string | null;
+  xmp_is_generative_ai: boolean;
 }
 
 export interface AnalyzeReport {
@@ -70,6 +73,7 @@ export interface AnalyzeReport {
   ai_probability: number | null;
   confidence_band: "high" | "medium" | "low" | null;
   calibrated: boolean;
+  verdict_source: "ensemble" | "c2pa" | "xmp" | string;
   models: ModelScoreOut[];
   model_accuracy: ModelAccuracyOut | null;
   beauty: BeautyOut | null;

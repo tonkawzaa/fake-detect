@@ -34,10 +34,19 @@ export function ProvenancePanel({ provenance }: { provenance: ProvenanceOut }) {
             )}
           </>
         )}
+        <Row label="XMP digitalSourceType" value={provenance.xmp_present ? "Present" : "Not found"} />
+        {provenance.xmp_present && provenance.xmp_digital_source_type && (
+          <>
+            <Row label="Value" value={provenance.xmp_digital_source_type} />
+            {provenance.xmp_is_generative_ai && (
+              <Row label="⚠️ Generative AI claim" value={<span className="text-danger">Yes (unsigned metadata)</span>} />
+            )}
+          </>
+        )}
       </div>
-      {!provenance.exif_present && !provenance.c2pa_present && (
+      {!provenance.exif_present && !provenance.c2pa_present && !provenance.xmp_present && (
         <p className="mt-3 text-xs text-muted">
-          No EXIF or C2PA data found — common after social-media re-uploads, and not evidence either way.
+          No EXIF, C2PA, or XMP data found — common after social-media re-uploads, and not evidence either way.
         </p>
       )}
     </div>

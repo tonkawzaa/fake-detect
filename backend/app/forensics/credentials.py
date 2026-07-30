@@ -16,10 +16,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GENERATIVE_AI_HINTS = (
-    "midjourney", "dall-e", "dalle", "stable diffusion", "firefly", "openai",
-    "generative", "diffusion", "gpt", "imagen", "flux",
-)
+from .ai_hints import GENERATIVE_AI_HINTS
 
 
 @dataclass
@@ -58,13 +55,16 @@ def read_c2pa(image_bytes: bytes, suffix: str = ".jpg") -> C2paReport:
 
     claim_generator = manifest.get("claim_generator") or manifest.get("claim_generator_info", [{}])[0].get("name")
     actions = []
+    source_types = []
     for assertion in manifest.get("assertions", []):
         if assertion.get("label", "").startswith("c2pa.actions"):
             for action in assertion.get("data", {}).get("actions", []):
                 if action.get("action"):
                     actions.append(action["action"])
+                if action.get("digitalSourceType"):
+                    source_types.append(action["digitalSourceType"])
 
-    haystack = " ".join(filter(None, [claim_generator, *actions])).lower()
+    haystack = " ".join(filter(None, [claim_generator, *actions, *source_types])).lower()
     is_ai = any(hint in haystack for hint in GENERATIVE_AI_HINTS)
 
     return C2paReport(
