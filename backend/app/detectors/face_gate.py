@@ -23,8 +23,8 @@ from PIL import Image
 
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "face_landmarker.task"
 
-MIN_FACE_AREA_FRACTION = 0.04
-MIN_FACE_BBOX_PX = 96
+MIN_FACE_AREA_FRACTION = 0.015
+MIN_FACE_BBOX_PX = 64
 MANY_FACES_THRESHOLD = 5
 BLUR_LOW_THRESHOLD = 60.0  # variance of Laplacian below this ~= visibly blurry
 
