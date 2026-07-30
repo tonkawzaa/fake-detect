@@ -2,9 +2,14 @@
 Phase 2: AI-generation detection.
 
 Runs the ensemble (built in registry.build_ensemble(), membership decided by
-the Phase 0 smoke test) on two crops per image -- the full frame and a tight
-face crop -- because AI face artifacts concentrate in the face while global
-cues (lighting consistency, background) show up in the full frame.
+the Phase 0 smoke test) on up to two crops per image -- the full frame and a
+tight face crop -- because AI face artifacts concentrate in the face while
+global cues (lighting consistency, background) show up in the full frame.
+The face crop is only available when pipeline.py's face_gate found a
+face_gate-quality-passing face (see analyze()'s bbox_px param) -- this
+module no longer requires a face at all, since face_gate no longer gates
+the whole /analyze request (2026-07-30: this tool covers arbitrary images,
+not just portraits). Without a bbox, every model's score is full-frame-only.
 
 Fusion is logit-space averaging with per-model weights, then Platt/temperature
 calibration fit in scripts/evaluate.py (Phase 5) and loaded from
@@ -12,6 +17,14 @@ calibration.json at startup. Until that calibration file exists, weights
 default to equal and the sigmoid is uncalibrated (raw ensemble average) --
 main.py surfaces this via /model-info so the UI doesn't imply a calibrated
 number it doesn't have.
+
+Honest limitation: calibration.json's Platt params and per-model weights
+were fit by scripts/evaluate.py scoring two crops per image (full frame +
+face crop) on data/eval/, which is itself face-gated by construction (see
+scripts/fetch_eval_set.py). A full-frame-only score (no bbox_px) feeds a
+differently-distributed raw_logit into that same Platt mapping -- not
+nonsense, but extrapolation beyond what was actually measured. There is no
+separate calibration for the no-face path.
 """
 
 from __future__ import annotations
@@ -50,8 +63,8 @@ def crop_face(image: Image.Image, bbox_px: tuple[int, int, int, int], margin: fl
 class ModelScore:
     name: str
     p_ai_full: float
-    p_ai_face: float
-    p_ai_combined: float  # mean of full+face for this model
+    p_ai_face: float | None  # None when no face crop was available
+    p_ai_combined: float  # mean of full+face, or just p_ai_full when no face
     weight: float
     eval_auc: float | None = None
 
@@ -84,9 +97,9 @@ class AIDetectorEnsemble:
         "threshold": 0.5, "per_model_auc": {name: auc}}"""
         self.calibration = calibration
 
-    def analyze(self, full_image: Image.Image, bbox_px: tuple[int, int, int, int]) -> EnsembleResult:
+    def analyze(self, full_image: Image.Image, bbox_px: tuple[int, int, int, int] | None) -> EnsembleResult:
         adapters = self._ensure_loaded()
-        face_crop = crop_face(full_image, bbox_px)
+        face_crop = crop_face(full_image, bbox_px) if bbox_px is not None else None
 
         weights_cfg = (self.calibration or {}).get("weights", {})
         aucs_cfg = (self.calibration or {}).get("per_model_auc", {})
@@ -98,8 +111,8 @@ class AIDetectorEnsemble:
 
         for adapter in adapters:
             p_full = adapter.predict(full_image)
-            p_face = adapter.predict(face_crop)
-            p_combined = (p_full + p_face) / 2.0
+            p_face = adapter.predict(face_crop) if face_crop is not None else None
+            p_combined = (p_full + p_face) / 2.0 if p_face is not None else p_full
             weight = float(weights_cfg.get(adapter.name, default_weight))
 
             weighted_logit_sum += weight * _logit(p_combined)

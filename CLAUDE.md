@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A locally-run web app that analyses a single portrait photo and reports (1) an AI-generated-vs-real probability from a model ensemble, (2) a beauty/retouching-filter score from a hand-built pixel-statistics heuristic, and (3) EXIF/C2PA provenance. Two independent processes: a FastAPI backend (`backend/`) and a Next.js frontend (`frontend/`) that talks to it over HTTP.
+A locally-run web app that analyses a single photo and reports (1) an AI-generated-vs-real probability from a model ensemble, (2) a beauty/retouching-filter score from a hand-built pixel-statistics heuristic (portraits only — requires a detected face), and (3) EXIF/C2PA provenance. Two independent processes: a FastAPI backend (`backend/`) and a Next.js frontend (`frontend/`) that talks to it over HTTP.
+
+**2026-07-30: this used to be portrait-only** — `face_gate` (MediaPipe FaceLandmarker) refused to analyze anything without a detected face at all. It now runs on any image; face detection is informational only and gates just two things (the AI ensemble's face-crop pass, and the beauty engine, which structurally needs FaceMesh landmarks) rather than the whole request. See `pipeline.py`'s module docstring for the full account, including the one honest limitation this creates: `data/eval/`'s measured accuracy (`scripts/evaluate.py`) is itself face-gated by construction (`scripts/fetch_eval_set.py`), so it's a claim about portraits specifically and doesn't cover the no-face path.
 
 ## Commands
 
@@ -45,10 +47,10 @@ npm run lint
 ## Architecture
 
 ### Request flow (`backend/app/pipeline.py`)
-`POST /analyze` → `face_gate` (MediaPipe FaceLandmarker) gates the input to "is this a usable portrait" → if not, returns `status: "no_face"|"low_quality"` with no fabricated scores → if yes, runs three independent stages and merges results, each wrapped so one stage failing doesn't 500 the whole request:
-1. **AI-detection ensemble** (`app/detectors/ai_detector.py`) — runs each model in `registry.build_ensemble()` on both the full frame and a margin-padded face crop, fuses via weighted logit averaging + Platt scaling
-2. **Beauty engine** (`app/beauty/`) — pixel-statistics features over FaceMesh-derived regions
-3. **Provenance** (`app/forensics/`) — EXIF (`piexif`) + C2PA (`c2pa-python`)
+`POST /analyze` → `face_gate` (MediaPipe FaceLandmarker) runs first but no longer gates the request (see "What this is" above) → three independent stages run and merge results regardless of whether a face was found, each wrapped so one stage failing doesn't 500 the whole request:
+1. **AI-detection ensemble** (`app/detectors/ai_detector.py`) — runs each model in `registry.build_ensemble()` on the full frame, plus a margin-padded face crop *when a face passed face_gate's size/quality check* (a tiny bbox crop would be an out-of-distribution input the calibration was never fit on, not just a noisier one) — fuses via weighted logit averaging + Platt scaling
+2. **Beauty engine** (`app/beauty/`) — pixel-statistics features over FaceMesh-derived regions; simply absent (not an error) when no usable face was found, since it structurally requires landmarks
+3. **Provenance** (`app/forensics/`) — EXIF (`piexif`) + C2PA (`c2pa-python`) — always runs, face-independent
 
 Plus a saliency heatmap (`app/detectors/heatmap.py`) computed via input-gradient on the primary ensemble model (not attention rollout — timm's fused attention path doesn't expose per-head weights without fragile monkeypatching, so gradient saliency was used instead; see the module docstring).
 

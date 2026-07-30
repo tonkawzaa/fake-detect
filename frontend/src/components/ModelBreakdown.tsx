@@ -35,7 +35,7 @@ export function ModelBreakdown({ models }: { models: ModelScoreOut[] }) {
                 <tr key={m.name} className="border-b border-card-border last:border-0">
                   <td className="py-2 pr-2 font-medium">{m.name}</td>
                   <td className="py-2 pr-2">{(m.ai_probability_full * 100).toFixed(1)}%</td>
-                  <td className="py-2 pr-2">{(m.ai_probability_face * 100).toFixed(1)}%</td>
+                  <td className="py-2 pr-2">{m.ai_probability_face != null ? `${(m.ai_probability_face * 100).toFixed(1)}%` : "—"}</td>
                   <td className="py-2 pr-2">{(m.ai_probability_combined * 100).toFixed(1)}%</td>
                   <td className="py-2 pr-2">{(m.weight * 100).toFixed(0)}%</td>
                   <td className="py-2 pr-2">{m.eval_auc != null ? m.eval_auc.toFixed(3) : "—"}</td>

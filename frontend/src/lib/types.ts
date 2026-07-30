@@ -3,7 +3,7 @@
 export interface ModelScoreOut {
   name: string;
   ai_probability_full: number;
-  ai_probability_face: number;
+  ai_probability_face: number | null; // null when no usable face was found
   ai_probability_combined: number;
   weight: number;
   eval_auc: number | null;
@@ -67,7 +67,7 @@ export interface ProvenanceOut {
 }
 
 export interface AnalyzeReport {
-  status: "ok" | "no_face" | "low_quality";
+  status: "ok"; // always "ok" as of 2026-07-30 -- face_gate no longer gates the request; see `face` for face-detection info
   message: string;
   verdict: "likely_ai" | "likely_real" | "uncertain" | null;
   ai_probability: number | null;

@@ -1,10 +1,16 @@
 """
 Phase 1: face gate.
 
-Requirement 1 ("เป็นภาพคน ด้วยตนเอง") is both a scope statement and an input
-gate — this tool analyses portraits of people, not arbitrary images. We run
-MediaPipe FaceLandmarker first and refuse to fabricate a verdict when the
-input isn't a usable portrait.
+2026-07-30: this no longer gates the /analyze request at all -- this tool
+covers arbitrary images, not just portraits of people (that used to be
+Requirement 1, "เป็นภาพคน ด้วยตนเอง"; see pipeline.py's module docstring for
+the current framing). MediaPipe FaceLandmarker still runs first on every
+image, but its result is now purely informational input to two downstream
+decisions in pipeline.py: whether the AI-detection ensemble gets a face
+crop in addition to the full frame, and whether the beauty engine (which
+structurally requires FaceMesh landmarks) runs at all. GateResult.status
+("ok"/"no_face"/"low_quality") is an internal signal for those two
+decisions, not something the API surfaces as a blocking verdict anymore.
 
 Note: mediapipe 0.10.35 dropped the old `mp.solutions` API entirely (verified
 empirically — `mp.solutions` no longer exists on this install). Only the
@@ -107,8 +113,9 @@ class FaceGate:
         if face_count == 0:
             return GateResult(
                 status="no_face",
-                message="No face detected. This tool analyses portrait photos of people, not general images.",
+                message="No face detected -- AI-detection ran full-frame only; beauty score unavailable.",
                 face_count=0,
+                notes=["No face detected; beauty score and face-crop AI pass are unavailable for this image."],
             )
 
         # Pick the largest face by landmark bounding-box area.
@@ -131,9 +138,13 @@ class FaceGate:
         face = FaceResult(bbox_px=bbox, landmarks_norm=landmarks_norm)
 
         if coverage < MIN_FACE_AREA_FRACTION or bbox[2] < MIN_FACE_BBOX_PX or bbox[3] < MIN_FACE_BBOX_PX:
+            notes.append(
+                "Face is too small in the frame for a reliable per-face analysis; "
+                "beauty score and face-crop AI pass are unavailable, AI-detection ran full-frame only."
+            )
             return GateResult(
                 status="low_quality",
-                message="Face is too small in the frame for a reliable analysis.",
+                message="Face too small in the frame for a reliable per-face analysis.",
                 face_count=face_count,
                 face=face,
                 quality=quality,

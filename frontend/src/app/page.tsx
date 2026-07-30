@@ -60,10 +60,10 @@ export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-10 sm:px-6">
       <header className="flex flex-col items-center gap-2 text-center">
-        <h1 className="text-2xl font-bold sm:text-3xl">AI Portrait Detector</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl">AI Image Detector</h1>
         <p className="max-w-xl text-sm text-muted">
-          Local, offline analysis of portrait photos — is it AI-generated, and has it likely been run through a
-          beauty/retouching filter? Select one photo or several at once.
+          Local, offline analysis of any photo — is it AI-generated? Portraits also get a beauty/retouching-filter
+          score, since that check needs a detected face. Select one photo or several at once.
         </p>
       </header>
 
@@ -86,19 +86,6 @@ export default function Home() {
                 <div className="rounded-2xl border border-danger/30 bg-danger/5 p-6 text-center">
                   <p className="font-medium text-danger">Analysis failed for {selectedRow.file.name}</p>
                   <p className="mt-1 text-sm text-muted">{selectedRow.error}</p>
-                </div>
-              ) : selectedRow.report && selectedRow.report.status !== "ok" ? (
-                <div className="rounded-2xl border border-warn/30 bg-warn/5 p-6 text-center">
-                  <p className="font-medium text-warn">
-                    {selectedRow.report.status === "no_face" ? "No face detected" : "Face too small / low quality"}
-                  </p>
-                  <p className="mt-1 text-sm text-muted">{selectedRow.report.message}</p>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={selectedRow.previewUrl}
-                    alt={selectedRow.file.name}
-                    className="mx-auto mt-4 max-h-64 rounded-xl border border-card-border object-contain"
-                  />
                 </div>
               ) : selectedRow.report ? (
                 <>

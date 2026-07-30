@@ -14,7 +14,6 @@ function StatusCell({ row }: { row: ReportRow }) {
       </span>
     );
   if (row.status === "error") return <span className="text-xs font-medium text-danger">Failed</span>;
-  if (row.report?.status !== "ok") return <span className="text-xs font-medium text-warn">No usable face</span>;
   return <span className="text-xs font-medium text-safe">Done</span>;
 }
 

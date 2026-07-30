@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class ModelScoreOut(BaseModel):
     name: str
     ai_probability_full: float
-    ai_probability_face: float
+    ai_probability_face: float | None = None  # None when no usable face was found (see pipeline.py)
     ai_probability_combined: float
     weight: float
     eval_auc: float | None = None
@@ -14,7 +14,11 @@ class ModelScoreOut(BaseModel):
 
 class ModelAccuracyOut(BaseModel):
     """Measured on the held-out eval set (scripts/evaluate.py), NOT the
-    per-image confidence above -- see the two-percentages note in the plan."""
+    per-image confidence above -- see the two-percentages note in the plan.
+    data/eval/ is itself face-gated by construction (scripts/fetch_eval_set.py
+    keeps only images that pass face_gate), so this accuracy is a claim about
+    portraits specifically -- it doesn't cover the no-face path pipeline.py
+    now also analyzes (see pipeline.py's module docstring, 2026-07-30)."""
 
     accuracy: float | None = None
     auc: float | None = None
@@ -79,7 +83,11 @@ class ProvenanceOut(BaseModel):
 
 
 class AnalyzeReport(BaseModel):
-    status: str  # "ok" | "no_face" | "low_quality"
+    status: str  # always "ok" as of 2026-07-30 -- face_gate no longer gates
+    # the request (see pipeline.py's module docstring); this field is kept
+    # (rather than dropped) so existing API consumers don't break on a
+    # missing key, but nothing sets it to anything but "ok" anymore. Whether
+    # a face was found is now informational-only, in `face` below.
     message: str
     verdict: str | None = None
     ai_probability: float | None = None
