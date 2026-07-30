@@ -1,26 +1,26 @@
 {
   "ai_ensemble": {
     "weights": {
-      "community-forensics-384": 0.5012768372268986,
-      "siglip2-giant-linear-probe": 0.4987231627731013
+      "community-forensics-384": 0.5022268549227707,
+      "dinov3-vit-l16-linear-probe": 0.49777314507722925
     },
     "platt": {
-      "a": 1.9771700846968567,
-      "b": 4.715794077906349
+      "a": 1.6583758677785867,
+      "b": 4.827693723334964
     },
     "threshold": 0.5,
     "per_model_auc": {
       "community-forensics-384": 0.995049504950495,
-      "siglip2-giant-linear-probe": 0.9925275546422567
+      "dinov3-vit-l16-linear-probe": 0.9906594433028209
     },
-    "accuracy": 0.9951690821256038,
-    "auc": 0.9999065944330282,
+    "accuracy": 0.9855072463768116,
+    "auc": 0.9998131888660564,
     "n": 207,
     "out_of_fold": true,
     "per_generator": {
-      "ffhq": 0.99,
+      "ffhq": 0.98,
       "imagenet": 1.0,
-      "stable_cascade": 1.0,
+      "stable_cascade": 0.0,
       "stylegan": 1.0
     }
   },
