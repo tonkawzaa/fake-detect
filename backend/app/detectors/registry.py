@@ -231,10 +231,91 @@ class DINOv3LinearProbeAdapter:
         return 1.0 / (1.0 + math.exp(-logit))
 
 
+@dataclass
+class DINOv3LoRAMACAdapter:
+    """DINOv3 ViT-L/16 backbone + LoRA adapters + MAC (Multi-Attribute/
+    Auxiliary Classifier) head -- main branch: real/fake (the only thing
+    predict() exposes); auxiliary branch: generator-family, a training-only
+    regularizer signal (see app/detectors/generator_family.py) that never
+    surfaces through this adapter's interface. Unlike
+    DINOv3LinearProbeAdapter above, the backbone here is NOT frozen -- LoRA
+    adapters on top of it are fine-tuned end-to-end with the MAC head. See
+    app/detectors/dinov3_lora_mac.py's module docstring for the model
+    architecture, including an empirically-discovered footgun in this
+    checkpoint's attention implementation (EvaAttention's
+    qkv_bias_separate flag) that would otherwise have made the attn.qkv
+    LoRA adapter silently inert.
+
+    Trained in two stages (scripts/train_dinov3_lora_mac_stage1.py, then
+    scripts/train_dinov3_lora_mac_stage2.py's self-distillation pass for
+    perturbation robustness) -- this adapter loads ONLY stage 2's final
+    output (dinov3_lora_mac.safetensors + _meta.json). Stage 1's own
+    checkpoint (dinov3_lora_mac_stage1.safetensors) is a training-internal
+    teacher snapshot consumed by stage 2 and never read here.
+
+    Artifact shape differs from CLIPLinearProbeAdapter/
+    DINOv3LinearProbeAdapter's single {weight, bias} JSON: a LoRA adapter
+    plus a multi-branch head doesn't fit that shape, so this uses
+    safetensors (LoRA delta weights + both head state dicts) plus a JSON
+    sidecar for metadata (aux_classes, LoRA config, feature_dim). Same
+    "local build artifact, load() fails loudly if missing" contract as
+    those two adapters otherwise.
+    """
+
+    name: str = "dinov3-vit-l16-lora-mac"
+    weights_path: Path = Path(__file__).resolve().parent / "dinov3_lora_mac.safetensors"
+    meta_path: Path = Path(__file__).resolve().parent / "dinov3_lora_mac_meta.json"
+
+    def load(self) -> None:
+        from .dinov3_lora_mac import DINOv3LoRAMACModel, load_checkpoint
+
+        if not self.weights_path.exists() or not self.meta_path.exists():
+            raise FileNotFoundError(
+                f"{self.weights_path.name} / {self.meta_path.name} not found -- run "
+                "`uv run python scripts/train_dinov3_lora_mac_stage1.py` then "
+                "`uv run python scripts/train_dinov3_lora_mac_stage2.py` to train this model "
+                "before this adapter can load."
+            )
+        meta = json.loads(self.meta_path.read_text())
+
+        self.device = get_device()
+        self.model = DINOv3LoRAMACModel(
+            aux_classes=meta["aux_classes"],
+            lora_r=meta["lora"]["r"],
+            lora_alpha=meta["lora"]["alpha"],
+            lora_dropout=meta["lora"]["dropout"],
+        )
+        if meta["feature_dim"] != self.model.feature_dim:
+            raise ValueError(
+                f"{self.meta_path.name}: checkpoint was trained with feature_dim="
+                f"{meta['feature_dim']} but the current model produces "
+                f"{self.model.feature_dim}-dim features -- retrain before using this adapter."
+            )
+        self.model.to(self.device)
+        load_checkpoint(self.model, path=self.weights_path)
+        self.model.eval()
+
+    @torch.no_grad()
+    def predict(self, image: Image.Image) -> float:
+        x = self.model.transform(image.convert("RGB")).unsqueeze(0).to(self.device)
+        main_logit, _aux_logit = self.model(x)
+        return torch.sigmoid(main_logit).item()
+
+
 def build_candidates() -> list[DetectorAdapter]:
     """All candidates to be smoke-tested. Ensemble membership is decided
-    by scripts/smoke_test_models.py, not hardcoded here."""
+    by scripts/smoke_test_models.py, not hardcoded here.
+
+    DINOv3LoRAMACAdapter is listed FIRST deliberately, not just
+    alphabetically/historically: build_ensemble()'s list order (not
+    ENSEMBLE_MODEL_NAMES's tuple order) determines adapters[0], which
+    pipeline.py treats as the "primary" model for heatmap saliency (see
+    app/detectors/heatmap.py). Putting the new model first is what actually
+    makes it "the main model" the way it's used, not just its position in
+    ENSEMBLE_MODEL_NAMES below.
+    """
     return [
+        DINOv3LoRAMACAdapter(),
         CommForAdapter(),
         HFClassifierAdapter(
             repo_id="prithivMLmods/deepfake-detector-model-v1",
@@ -277,21 +358,62 @@ def build_candidates() -> list[DetectorAdapter]:
 #                                     feature module (siglip2_features.py), training script, and
 #                                     supporting perturbations.py were all deleted rather than
 #                                     kept as dead weight alongside the replacement.
-#   dinov3-vit-l16-linear-probe      polarity PASS  acc 0.98  -> KEPT (probe trained by
-#                                     scripts/train_dinov3_probe.py: out-of-fold acc 0.984,
-#                                     AUC 0.999 on data/clip_train/, n=2012 (no perturbation
-#                                     augmentation, unlike the removed siglip2 probe -- see
-#                                     that script's docstring for the honest-limitation note).
+#   dinov3-vit-l16-linear-probe      polarity PASS  acc 0.98  -> superseded, kept as fallback
+#                                     (probe trained by scripts/train_dinov3_probe.py:
+#                                     out-of-fold acc 0.984, AUC 0.999 on the pre-diversification
+#                                     data/clip_train/, n=2012, no perturbation augmentation).
 #                                     Best measured accuracy of any single candidate on both the
-#                                     smoke set and data/clip_train/'s OOF numbers, at ~223ms/image.
-#                                     data/clip_train/ is still ~99% ffhq/stylegan (n=2012, only
-#                                     ~12 rows from other generators), so this accuracy is weaker
-#                                     evidence of generalization to unseen generators than CLIP's
-#                                     smaller-but-more-varied training claim -- worth keeping in
-#                                     mind if this pairing's data/eval/ numbers ever look too good.
+#                                     smoke set and data/clip_train/'s OOF numbers, at ~223ms/image,
+#                                     until dinov3-vit-l16-lora-mac below. NOT deleted (unlike the
+#                                     siglip2 probe above) -- kept in build_candidates() as an
+#                                     explicit fallback in case the LoRA+MAC model underperforms on
+#                                     the diverse-generator slice once evaluate.py is re-run.
+#   dinov3-vit-l16-lora-mac          2026-08-01: polarity PASS, acc 0.980 on the smoke set
+#                                     (~266ms/image) -> KEPT, PROMOTED to primary/anchor.
+#                                     LoRA-fine-tuned (not frozen) DINOv3 ViT-L/16 + MAC
+#                                     (Multi-Attribute/Auxiliary Classifier) head -- see
+#                                     app/detectors/dinov3_lora_mac.py and
+#                                     scripts/train_dinov3_lora_mac_stage1.py / _stage2.py
+#                                     (self-distillation for perturbation robustness).
+#                                     Stage 1 (trained on the diversified data/clip_train/,
+#                                     n=2701, 8 distinct AI generator families after
+#                                     de-duplication against data/eval/): held-out accuracy
+#                                     0.991, AUC 1.000 (n=541); diverse-generator slice 0.977
+#                                     (n=88, n_diverse_ai=71). Stage 2's self-distillation kept
+#                                     clean-image accuracy identical (0.991) while raising
+#                                     accuracy on a fixed perturbed (JPEG/blur/noise/resize)
+#                                     copy of the held-out set from 0.837 (stage-1 teacher) to
+#                                     0.972 (stage-2 student) -- confirms the stage bought real
+#                                     robustness, not just a no-op refinement.
+#                                     scripts/evaluate.py re-run (this pairing, on data/eval/,
+#                                     n=495): accuracy 0.996, AUC 1.000 -- beats the incumbent
+#                                     pairing's 0.984/0.999 on every single per-generator
+#                                     breakdown (no regression anywhere), and this model's own
+#                                     per-model AUC (0.999) dramatically outperforms the frozen
+#                                     probe it replaced (0.610 on this same diversified set --
+#                                     see dinov3-vit-l16-linear-probe's entry above, exactly the
+#                                     FFHQ/StyleGAN-overfitting failure this restructuring was
+#                                     meant to fix). Promoted to primary/anchor (see
+#                                     build_candidates()'s ordering note) per explicit request,
+#                                     while KEEPING community-forensics-384 in the ensemble
+#                                     rather than replacing it outright -- it remains the only
+#                                     member pretrained on broad external data, a deliberate
+#                                     safety net against data/clip_train/ still being comparatively
+#                                     narrow (n=2701) next to the pretraining corpora behind the
+#                                     other ensemble members.
 #
 # This is the *default* ensemble read by ai_detector.py. Re-run the smoke
 # test and update this list if models are added/removed/updated.
+#
+# Promotion bar that was applied above for dinov3-vit-l16-lora-mac replacing
+# dinov3-vit-l16-linear-probe in ENSEMBLE_MODEL_NAMES: the challenger's
+# diverse-slice (non-ffhq/stylegan) eval accuracy must be >= the incumbent
+# pairing's, both measured on the same diversified data/eval/, decisive once
+# n_diverse_ai >= 30. Cleared (n_diverse_ai=145, both pairings scored 1.000 on
+# the diverse-AI slice specifically, and the challenger additionally improved
+# on every other per-generator breakdown). If a future retrain regresses this,
+# revert to ("community-forensics-384", "dinov3-vit-l16-linear-probe") -- the
+# fallback is kept in build_candidates() specifically so that revert is cheap.
 #
 # ENSEMBLE_MODEL_NAMES was deliberately narrowed to two models (was:
 # community-forensics-384 + prithivmlmods-siglip-deepfake-v1 +
@@ -314,9 +436,16 @@ def build_candidates() -> list[DetectorAdapter]:
 # rather than left as unused dead code -- data/clip_train/'s heavy
 # ffhq/stylegan skew means DINOv3's probe-training accuracy doesn't yet
 # prove it generalizes as well as that comparison would suggest on its own.
+#
+# 2026-08-01: the anchor slot was community-forensics-384 (unchanged) paired
+# with dinov3-vit-l16-linear-probe; restructured so dinov3-vit-l16-lora-mac
+# (LoRA-fine-tuned, not frozen, plus a MAC head) takes the second slot AND
+# is listed first in build_candidates() (see that function's ordering note)
+# so it -- not community-forensics-384 -- is treated as the "main" model for
+# heatmap saliency, per explicit request. See the promotion bar above.
 ENSEMBLE_MODEL_NAMES: tuple[str, ...] = (
+    "dinov3-vit-l16-lora-mac",
     "community-forensics-384",
-    "dinov3-vit-l16-linear-probe",
 )
 
 

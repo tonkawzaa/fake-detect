@@ -1,0 +1,54 @@
+{
+  "model_name": "vit_large_patch16_dinov3_qkvb.lvd1689m",
+  "feature_dim": 2048,
+  "lora": {
+    "target_modules": [
+      "attn.qkv",
+      "attn.proj",
+      "mlp.fc1",
+      "mlp.fc2"
+    ],
+    "r": 8,
+    "alpha": 16,
+    "dropout": 0.05
+  },
+  "aux_classes": [
+    "diffusion",
+    "gan",
+    "other-ai"
+  ],
+  "aux_loss_weight": 0.3,
+  "distill_weight": 1.0,
+  "n_train": 2160,
+  "epochs": 2,
+  "held_out_metrics": {
+    "overall_accuracy": 0.9907578558225508,
+    "overall_auc": 0.9998359983599836,
+    "n": 541,
+    "core_accuracy": 0.9911699779249448,
+    "n_core": 453,
+    "diverse_accuracy": 0.9886363636363636,
+    "n_diverse": 88,
+    "n_diverse_ai": 71,
+    "per_generator_family_accuracy": {
+      "diffusion": {
+        "n": 70,
+        "accuracy": 1.0
+      },
+      "gan": {
+        "n": 200,
+        "accuracy": 1.0
+      },
+      "other-ai": {
+        "n": 1,
+        "accuracy": 1.0
+      }
+    },
+    "held_out": true
+  },
+  "perturbed_accuracy": {
+    "teacher_stage1": 0.8373382624768947,
+    "student_stage2": 0.9722735674676525,
+    "n": 541
+  }
+}

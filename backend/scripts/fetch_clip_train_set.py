@@ -88,13 +88,21 @@ CF_TRAIN_OFFSETS = list(range(0, 51800, 100))
 # This is a KEPT-count target (see fetch_community_forensics: the stopping
 # condition below now checks real_kept/ai_kept, not how many rows were
 # merely examined) -- reaching it requires scanning roughly kept/yield_rate
-# candidates per label. At the ~2% ai yield rate observed, 100 kept ai needs
-# ~5,000 ai-labeled rows examined -- well within the 51,836-row split, so
-# this (unlike an earlier 310-each attempt) should reliably hit its target
-# rather than being capped by the split running out. Lowered from 310 to
-# 100 per explicit request, trading some generator-diversity breadth for a
-# much shorter scan.
-CF_TRAIN_TARGET_EACH = 100
+# candidates per label. Raised back up from 100 (itself a deliberate
+# reduction from an original 310, "trading generator-diversity breadth for
+# a much shorter scan") for the DINOv3-LoRA-MAC restructuring: a LoRA
+# fine-tune and a generator-family MAC aux head both need real
+# generator diversity to be anything other than "is it StyleGAN" in
+# disguise (see CLAUDE.md's account of why the pre-diversification
+# data/clip_train/ -- 99.4% ffhq/stylegan, n=2012 -- was a load-bearing
+# blocker for that restructuring). fetch_eval_set.py's freshly-fixed
+# CF_EVAL fetch (same offset-stepping bugfix as this file already had)
+# measured actual yield rates of ~7.7% real / ~5.8% ai on this exact HF
+# source -- both meaningfully better than the ~2%/6% this comment
+# previously assumed -- so 500 kept-each is comfortably reachable within
+# the 51,836-row split scanned by CF_TRAIN_OFFSETS above, without needing
+# to widen that range further.
+CF_TRAIN_TARGET_EACH = 500
 
 HTTP_RETRIES = 3
 
@@ -204,16 +212,29 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]], seen_hashes:
                 continue
             try:
                 raw = base64.b64decode(b64)
-            except Exception:
-                continue
-            h = hashlib.sha256(raw).hexdigest()
-            if h in seen_hashes:
-                skipped_dupes += 1
-                continue
-
-            try:
                 img = Image.open(io.BytesIO(raw)).convert("RGB")
             except Exception:
+                continue
+
+            # Hash the RE-ENCODED bytes (same format/quality this function
+            # saves with), NOT the raw pre-decode bytes from the HF source --
+            # every image from this source gets decoded and re-saved as
+            # JPEG q=92 rather than written verbatim (unlike kernel01's
+            # byte-for-byte saves below), so existing_hashes()'s on-disk
+            # hashes (computed from data/eval/'s already-saved, already
+            # re-encoded files) would almost never match a hash of the
+            # pre-encode raw bytes for the same source image -- confirmed
+            # empirically: this exact mismatch let 299 images end up
+            # duplicated in both data/eval/ and data/clip_train/ despite
+            # skipped_dupes reporting only 2, before this fix. Hashing (and
+            # saving) the identical re-encoded bytes here makes the
+            # comparison apples-to-apples.
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=92)
+            encoded = buf.getvalue()
+            h = hashlib.sha256(encoded).hexdigest()
+            if h in seen_hashes:
+                skipped_dupes += 1
                 continue
 
             if label == 0 and real_kept < CF_TRAIN_TARGET_EACH:
@@ -222,7 +243,7 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]], seen_hashes:
                 if gate_result.status == "ok":
                     seen_hashes.add(h)
                     fn = REAL_DIR / f"cftrain_{real_kept:04d}.jpg"
-                    img.save(fn, format="JPEG", quality=92)
+                    fn.write_bytes(encoded)
                     manifest.append((str(fn.relative_to(ROOT)), "real", r.get("real_source") or "unknown"))
                     real_kept += 1
             elif label == 1 and ai_kept < CF_TRAIN_TARGET_EACH:
@@ -231,7 +252,7 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]], seen_hashes:
                 if gate_result.status == "ok":
                     seen_hashes.add(h)
                     fn = AI_DIR / f"cftrain_{ai_kept:04d}.jpg"
-                    img.save(fn, format="JPEG", quality=92)
+                    fn.write_bytes(encoded)
                     manifest.append((str(fn.relative_to(ROOT)), "ai", model_name))
                     ai_kept += 1
         print(

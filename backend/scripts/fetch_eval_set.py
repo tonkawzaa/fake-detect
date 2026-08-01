@@ -52,8 +52,21 @@ MANIFEST_PATH = EVAL_DIR / "manifest.csv"
 KERNEL01_OFFSET_START = 600
 KERNEL01_TARGET_EACH = 100
 
-CF_EVAL_OFFSETS = list(range(0, 30000, 2500))  # spread across the 51,836-row split
-CF_EVAL_TARGET_EACH = 60  # per label, after face-gate filtering
+# Was range(0, 30000, 2500) with length=40 per request -- that only examined
+# 12 * 40 = 480 of the split's 51,836 rows (2460 of every 2500 silently
+# skipped), the same class of offset-stepping bug documented in
+# fetch_clip_train_set.py's CF_TRAIN_OFFSETS comment. Fixed the same way:
+# step by 100 (the HF datasets-server /rows endpoint's max `length`,
+# confirmed in fetch_clip_train_set.py) across the FULL split, so every row
+# is actually examined. This directly caused data/eval/'s prior
+# non-ffhq/stylegan AI count of 1 (a single stable_cascade sample) --
+# nowhere near enough to measure generalization to unseen generators.
+CF_EVAL_OFFSETS = list(range(0, 51800, 100))
+CF_EVAL_TARGET_EACH = 150  # per label, after face-gate filtering -- raised
+# from 60 (itself barely reachable under the old, narrower offset range) so
+# the diverse-generator slice of data/eval/ has enough samples (target: >=30
+# non-ffhq/stylegan AI rows) to make a promotion decision statistically
+# meaningful, per the DINOv3-LoRA-MAC restructuring plan.
 
 HTTP_RETRIES = 3
 
@@ -119,11 +132,20 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]]) -> None:
     real_kept = ai_kept = 0
 
     for offset in CF_EVAL_OFFSETS:
-        if real_count >= CF_EVAL_TARGET_EACH and ai_count >= CF_EVAL_TARGET_EACH:
+        # Gate on *_kept (rows that actually passed face_gate), not *_count
+        # (rows merely examined) -- an earlier version of this loop gated on
+        # *_count here, which meant it stopped scanning as soon as
+        # CF_EVAL_TARGET_EACH candidates had been SEEN, almost all of which
+        # get rejected by face_gate (this source's yield rate is ~2-6%, per
+        # fetch_clip_train_set.py's docstring) -- so it silently produced
+        # far fewer kept images than the target implied (1 diverse AI row
+        # out of a target of 60). fetch_clip_train_set.py's copy of this
+        # same function already gates on *_kept; this ports that fix here.
+        if real_kept >= CF_EVAL_TARGET_EACH and ai_kept >= CF_EVAL_TARGET_EACH:
             break
         url = (
             "https://datasets-server.huggingface.co/rows?dataset=OwensLab%2FCommunityForensics-Eval"
-            f"&config=default&split=CompEval&offset={offset}&length=40"
+            f"&config=default&split=CompEval&offset={offset}&length=100"
         )
         d = _get_json(url)
         if not d:
@@ -141,7 +163,7 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]]) -> None:
             except Exception:
                 continue
 
-            if label == 0 and real_count < CF_EVAL_TARGET_EACH:
+            if label == 0 and real_kept < CF_EVAL_TARGET_EACH:
                 gate_result = gate.run(img)
                 real_count += 1
                 if gate_result.status == "ok":
@@ -149,7 +171,7 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]]) -> None:
                     img.save(fn, format="JPEG", quality=92)
                     manifest.append((str(fn.relative_to(ROOT)), "real", r.get("real_source") or "unknown"))
                     real_kept += 1
-            elif label == 1 and ai_count < CF_EVAL_TARGET_EACH:
+            elif label == 1 and ai_kept < CF_EVAL_TARGET_EACH:
                 gate_result = gate.run(img)
                 ai_count += 1
                 if gate_result.status == "ok":

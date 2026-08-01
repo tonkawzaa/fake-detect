@@ -45,6 +45,22 @@ from PIL import Image
 DINOV3_MODEL_NAME = "vit_large_patch16_dinov3_qkvb.lvd1689m"
 
 
+def pool_dinov3_tokens(tokens: torch.Tensor, num_prefix_tokens: int) -> torch.Tensor:
+    """Shared pooling step: CLS token concatenated with mean-pooled patch
+    tokens, register tokens excluded from both. `tokens` is
+    `forward_features()`'s raw output, `[batch, num_prefix_tokens +
+    n_patches, dim]`. Factored out of DINOv3Backbone.extract() so the frozen
+    inference path here and the trainable LoRA path
+    (app/detectors/dinov3_lora_mac.py) use identical pooling code rather
+    than a hand-copied duplicate that could silently drift apart -- see
+    this module's top docstring for why that drift risk matters for a
+    linear probe."""
+    cls_token = tokens[:, 0]
+    patch_tokens = tokens[:, num_prefix_tokens:]
+    pooled_patches = patch_tokens.mean(dim=1)
+    return torch.cat([cls_token, pooled_patches], dim=-1)
+
+
 class DINOv3Backbone:
     """Frozen DINOv3 ViT-L/16 image encoder. Never call .train() or update
     its weights -- like CLIPBackbone, only a linear head on top of this is
@@ -72,7 +88,4 @@ class DINOv3Backbone:
         tokens excluded from both)."""
         x = self.transform(image.convert("RGB")).unsqueeze(0).to(self.device)
         tokens = self.model.forward_features(x)  # [1, num_prefix_tokens + n_patches, dim]
-        cls_token = tokens[:, 0]
-        patch_tokens = tokens[:, self.num_prefix_tokens :]
-        pooled_patches = patch_tokens.mean(dim=1)
-        return torch.cat([cls_token, pooled_patches], dim=-1)[0]
+        return pool_dinov3_tokens(tokens, self.num_prefix_tokens)[0]

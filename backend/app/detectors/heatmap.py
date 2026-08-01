@@ -21,7 +21,22 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .registry import CommForAdapter, HFClassifierAdapter, DetectorAdapter
+from .registry import CommForAdapter, DINOv3LoRAMACAdapter, HFClassifierAdapter, DetectorAdapter
+
+
+def _saliency_dinov3_lora_mac(adapter: DINOv3LoRAMACAdapter, image: Image.Image) -> np.ndarray:
+    """Gradient of the MAIN branch logit only, never a combined/summed MAC
+    output -- the aux (generator-family) branch is a training-time
+    regularizer signal, not something a user asking "where did the model
+    look" should see blended in."""
+    x = adapter.model.transform(image.convert("RGB")).unsqueeze(0).to(adapter.device)
+    x.requires_grad_(True)
+    main_logit, _aux_logit = adapter.model(x)
+    logit = main_logit.squeeze()
+    adapter.model.zero_grad(set_to_none=True)
+    logit.backward()
+    grad = x.grad.detach().abs().squeeze(0)  # (3, H, W)
+    return grad.max(dim=0).values.cpu().numpy()
 
 
 def _saliency_commfor(adapter: CommForAdapter, image: Image.Image) -> np.ndarray:
@@ -52,7 +67,9 @@ def compute_saliency_map(adapter: DetectorAdapter, image: Image.Image) -> np.nda
     """Returns a float32 array, same H/W as the model's input tensor, values >= 0."""
     was_training = getattr(adapter, "model", None) is not None and adapter.model.training
     try:
-        if isinstance(adapter, CommForAdapter):
+        if isinstance(adapter, DINOv3LoRAMACAdapter):
+            sal = _saliency_dinov3_lora_mac(adapter, image)
+        elif isinstance(adapter, CommForAdapter):
             sal = _saliency_commfor(adapter, image)
         elif isinstance(adapter, HFClassifierAdapter):
             sal = _saliency_hf_classifier(adapter, image)

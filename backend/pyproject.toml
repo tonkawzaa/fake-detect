@@ -24,6 +24,7 @@ dependencies = [
     "c2pa-python>=0.37",
     "diffusers>=0.30",
     "lpips>=0.1.4",
+    "peft>=0.13",
 ]
 
 [tool.uv]
