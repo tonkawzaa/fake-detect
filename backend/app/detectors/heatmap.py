@@ -2,9 +2,9 @@
 Heatmap overlay showing where the AI-detector's decision came from.
 
 Note on method: the plan sketched ViT attention rollout, but timm's fused
-attention path (used by both surviving models) doesn't expose per-head
-attention weights without invasive monkeypatching of internals that would be
-fragile across library versions. We use vanilla input-gradient saliency
+attention path (used by the ensemble's ViT-based models) doesn't expose
+per-head attention weights without invasive monkeypatching of internals that
+would be fragile across library versions. We use vanilla input-gradient saliency
 instead (gradient of the AI-logit w.r.t. input pixels) -- it is model-agnostic,
 robust to library updates, and answers the same user question ("where did the
 model look?") without the fragility. Labelled "saliency" in the API, not
@@ -21,7 +21,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .registry import CommForAdapter, DINOv3LoRAMACAdapter, HFClassifierAdapter, DetectorAdapter
+from .registry import DINOv3LoRAMACAdapter, HFClassifierAdapter, DetectorAdapter
 
 
 def _saliency_dinov3_lora_mac(adapter: DINOv3LoRAMACAdapter, image: Image.Image) -> np.ndarray:
@@ -33,17 +33,6 @@ def _saliency_dinov3_lora_mac(adapter: DINOv3LoRAMACAdapter, image: Image.Image)
     x.requires_grad_(True)
     main_logit, _aux_logit = adapter.model(x)
     logit = main_logit.squeeze()
-    adapter.model.zero_grad(set_to_none=True)
-    logit.backward()
-    grad = x.grad.detach().abs().squeeze(0)  # (3, H, W)
-    return grad.max(dim=0).values.cpu().numpy()
-
-
-def _saliency_commfor(adapter: CommForAdapter, image: Image.Image) -> np.ndarray:
-    x = adapter.transform(image.convert("RGB")).unsqueeze(0).to(adapter.device)
-    x.requires_grad_(True)
-    out = adapter.model(x)
-    logit = out.squeeze()
     adapter.model.zero_grad(set_to_none=True)
     logit.backward()
     grad = x.grad.detach().abs().squeeze(0)  # (3, H, W)
@@ -69,8 +58,6 @@ def compute_saliency_map(adapter: DetectorAdapter, image: Image.Image) -> np.nda
     try:
         if isinstance(adapter, DINOv3LoRAMACAdapter):
             sal = _saliency_dinov3_lora_mac(adapter, image)
-        elif isinstance(adapter, CommForAdapter):
-            sal = _saliency_commfor(adapter, image)
         elif isinstance(adapter, HFClassifierAdapter):
             sal = _saliency_hf_classifier(adapter, image)
         else:

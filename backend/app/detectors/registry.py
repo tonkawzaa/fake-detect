@@ -3,9 +3,9 @@ Detector adapter registry.
 
 Each AI-detection model gets its own adapter behind a common protocol
 rather than assuming every model is a plain `AutoModelForImageClassification`.
-Community Forensics in particular ships a custom ViT + custom HF image
-processor (see commfor_model.py) with no standard classification head to
-`from_pretrained` into transformers' AutoClasses.
+DINOv3LoRAMACAdapter and the linear-probe adapters below need custom
+feature-extraction/checkpoint-loading code that doesn't fit that generic
+shape; other models (SigLIP-based) use the generic `HFClassifierAdapter`.
 
 Adapters expose predict(image) -> float in [0, 1], where 1.0 means "AI
 generated". Polarity (which raw output index/sign means "fake") is a
@@ -42,45 +42,6 @@ class DetectorAdapter(Protocol):
     def predict(self, image: Image.Image) -> float:
         """Return p_ai in [0, 1] for a single PIL image (RGB)."""
         ...
-
-
-@dataclass
-class CommForAdapter:
-    """Community Forensics ViT-small/384, CVPR 2025 (JeongsooP/Community-Forensics)."""
-
-    repo_id: str = "OwensLab/commfor-model-384"
-    input_size: int = 384
-    name: str = "community-forensics-384"
-    # Set by smoke test after empirical verification; True means the raw
-    # sigmoid(out) already equals p_ai, False means it must be flipped.
-    sigmoid_is_p_ai: bool = True
-
-    def load(self) -> None:
-        from .commfor_model import ViTClassifier, commfor_resize_crop, COMMFOR_NORM_MEAN, COMMFOR_NORM_STD
-        from torchvision import transforms
-
-        self.device = get_device()
-        model = ViTClassifier.from_pretrained(self.repo_id)
-        model.eval()
-        model.to(self.device)
-        self.model = model
-
-        resize_size, crop_size = commfor_resize_crop(self.input_size)
-        self.transform = transforms.Compose(
-            [
-                transforms.Resize(resize_size),
-                transforms.CenterCrop(crop_size),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=COMMFOR_NORM_MEAN, std=COMMFOR_NORM_STD),
-            ]
-        )
-
-    @torch.no_grad()
-    def predict(self, image: Image.Image) -> float:
-        x = self.transform(image.convert("RGB")).unsqueeze(0).to(self.device)
-        out = self.model(x)
-        p = torch.sigmoid(out).item()
-        return p if self.sigmoid_is_p_ai else 1.0 - p
 
 
 @dataclass
@@ -316,7 +277,6 @@ def build_candidates() -> list[DetectorAdapter]:
     """
     return [
         DINOv3LoRAMACAdapter(),
-        CommForAdapter(),
         HFClassifierAdapter(
             repo_id="prithivMLmods/deepfake-detector-model-v1",
             name="prithivmlmods-siglip-deepfake-v1",
@@ -337,7 +297,7 @@ def build_candidates() -> list[DetectorAdapter]:
 # Phase 0 smoke-test results (scripts/smoke_test_models.py, 25 known-real +
 # 25 known-AI StyleGAN faces from TheKernel01/140k-Real-and-Fake-Faces):
 #
-#   community-forensics-384          polarity PASS  acc 0.84  -> KEPT
+#   community-forensics-384          polarity PASS  acc 0.84  -> REMOVED 2026-08-06, see below
 #   prithivmlmods-siglip-deepfake-v1 polarity PASS  acc 0.88  -> KEPT
 #   ateeqq-ai-vs-human               polarity PASS  acc 0.54  -> DROPPED (chance-level; all scores clustered near 0)
 #   bombek1-siglip-dinov2            load failed (no preprocessor_config.json for AutoImageProcessor) -> DROPPED
@@ -411,9 +371,9 @@ def build_candidates() -> list[DetectorAdapter]:
 # pairing's, both measured on the same diversified data/eval/, decisive once
 # n_diverse_ai >= 30. Cleared (n_diverse_ai=145, both pairings scored 1.000 on
 # the diverse-AI slice specifically, and the challenger additionally improved
-# on every other per-generator breakdown). If a future retrain regresses this,
-# revert to ("community-forensics-384", "dinov3-vit-l16-linear-probe") -- the
-# fallback is kept in build_candidates() specifically so that revert is cheap.
+# on every other per-generator breakdown). dinov3-vit-l16-linear-probe is kept
+# in build_candidates() as a cheap-to-revert-to fallback if a future retrain
+# regresses this.
 #
 # ENSEMBLE_MODEL_NAMES was deliberately narrowed to two models (was:
 # community-forensics-384 + prithivmlmods-siglip-deepfake-v1 +
@@ -443,10 +403,21 @@ def build_candidates() -> list[DetectorAdapter]:
 # is listed first in build_candidates() (see that function's ordering note)
 # so it -- not community-forensics-384 -- is treated as the "main" model for
 # heatmap saliency, per explicit request. See the promotion bar above.
-ENSEMBLE_MODEL_NAMES: tuple[str, ...] = (
-    "dinov3-vit-l16-lora-mac",
-    "community-forensics-384",
-)
+#
+# 2026-08-06: community-forensics-384 removed from the project entirely, per
+# explicit request. It was kept through the 2026-08-01 restructuring as a
+# safety net pretrained on broad external data, but dinov3-vit-l16-lora-mac's
+# own measured accuracy (0.996/1.000 on data/eval/, see above) no longer
+# needed that safety net to justify the ensemble. ENSEMBLE_MODEL_NAMES is now
+# a single model. Its adapter (CommForAdapter) and the vendored model class
+# it depended on (app/detectors/commfor_model.py) were deleted rather than
+# left as unused code -- same discipline as the siglip2-giant-linear-probe
+# removal on 2026-07-30 above. Unlike that removal, there is no fallback slot
+# in build_candidates() to revert to: reintroducing this model would mean
+# re-vendoring commfor_model.py from JeongsooP/Community-Forensics. Ensemble
+# weights/Platt scaling were refit with scripts/evaluate.py for the
+# single-model ensemble; see calibration.json.
+ENSEMBLE_MODEL_NAMES: tuple[str, ...] = ("dinov3-vit-l16-lora-mac",)
 
 
 def build_ensemble() -> list[DetectorAdapter]:

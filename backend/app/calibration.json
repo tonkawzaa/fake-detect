@@ -1,29 +1,27 @@
 {
   "ai_ensemble": {
     "weights": {
-      "dinov3-vit-l16-lora-mac": 0.5008185181547327,
-      "community-forensics-384": 0.49918148184526734
+      "dinov3-vit-l16-lora-mac": 1.0
     },
     "platt": {
-      "a": 2.0586449183226243,
-      "b": 4.184463287795168
+      "a": 2.518697720066695,
+      "b": 0.3201517726454251
     },
     "threshold": 0.5,
     "per_model_auc": {
-      "dinov3-vit-l16-lora-mac": 0.9994775510204081,
-      "community-forensics-384": 0.9978448979591836
+      "dinov3-vit-l16-lora-mac": 0.9994775510204081
     },
-    "accuracy": 0.9959595959595959,
-    "auc": 0.9999510204081633,
+    "accuracy": 0.9919191919191919,
+    "auc": 0.9991183673469388,
     "n": 495,
     "out_of_fold": true,
     "per_generator": {
       "DFGAN": 1.0,
-      "LAION": 0.9933333333333333,
+      "LAION": 0.9733333333333334,
       "MidjourneyV5_2": 1.0,
       "ffhq": 1.0,
       "stable_cascade": 1.0,
-      "stylegan": 0.99
+      "stylegan": 1.0
     }
   },
   "beauty": {

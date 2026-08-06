@@ -11,7 +11,7 @@ Checkpoint source: timm's `vit_large_patch16_dinov3_qkvb.lvd1689m` mirror,
 NOT `facebook/dinov3-vitl16-pretrain-lvd1689m` on the HF hub -- the
 facebook/dinov3-* repos are gated (manual approval required), while the timm
 mirrors of the same weights are ungated. `timm` is already a dependency of
-this repo (see commfor_model.py), so this adds no new package. Confirmed
+this repo (see app/detectors/dinov3_lora_mac.py), so this adds no new package. Confirmed
 empirically (2026-07-30) that both point at the same lvd1689m-pretrained
 ViT-L/16 weights.
 
