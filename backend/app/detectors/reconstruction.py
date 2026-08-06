@@ -189,4 +189,5 @@ def get_reconstruction_detector() -> AEROBLADEDetector:
     global _detector_singleton
     if _detector_singleton is None:
         _detector_singleton = AEROBLADEDetector()
+        _detector_singleton.load()
     return _detector_singleton
