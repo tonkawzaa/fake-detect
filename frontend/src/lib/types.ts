@@ -40,6 +40,7 @@ export interface ProvenanceOut {
 }
 
 export interface AnalyzeReport {
+  analysis_id: string;
   status: "ok"; // always "ok" -- kept for API back-compat, nothing sets it to anything else
   message: string;
   verdict: "likely_ai" | "likely_real" | "uncertain" | null;
@@ -60,4 +61,28 @@ export interface ModelInfoOut {
   calibrated: boolean;
   model_accuracy: ModelAccuracyOut | null;
   limitations: string[];
+}
+
+export interface FeedbackIn {
+  analysis_id: string;
+  verdict: string;
+  is_correct: boolean;
+}
+
+export interface FeedbackOut {
+  status: "ok";
+  analysis_id: string;
+}
+
+export interface VerdictBreakdownOut {
+  total: number;
+  correct_pct: number | null;
+  incorrect_pct: number | null;
+}
+
+export interface FeedbackStatsOut {
+  total: number;
+  correct_pct: number | null;
+  incorrect_pct: number | null;
+  by_verdict: Record<string, VerdictBreakdownOut>;
 }

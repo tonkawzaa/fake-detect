@@ -8,13 +8,17 @@ import { ProvenancePanel } from "@/components/ProvenancePanel";
 import { ModelBreakdown } from "@/components/ModelBreakdown";
 import { HeatmapView } from "@/components/HeatmapView";
 import { LimitationsFooter } from "@/components/LimitationsFooter";
-import { analyzeImage } from "@/lib/api";
-import type { ReportRow } from "@/lib/reportRow";
+import { FeedbackStatsPanel } from "@/components/FeedbackStatsPanel";
+import { analyzeImage, getFeedbackStats, submitFeedback } from "@/lib/api";
+import type { ReportRow, FeedbackVote } from "@/lib/reportRow";
+import type { FeedbackStatsOut } from "@/lib/types";
 
 export default function Home() {
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [running, setRunning] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [feedbackStats, setFeedbackStats] = useState<FeedbackStatsOut | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   async function handleFiles(files: File[]) {
     const newRows: ReportRow[] = files.map((file) => ({
@@ -54,6 +58,31 @@ export default function Home() {
     setRunning(false);
   }
 
+  async function handleVote(rowId: string, vote: FeedbackVote) {
+    const row = rows.find((r) => r.id === rowId);
+    if (!row?.report?.verdict) return;
+    setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, feedbackSubmitting: true } : r)));
+    try {
+      await submitFeedback({ analysis_id: row.report.analysis_id, verdict: row.report.verdict, is_correct: vote === "up" });
+      setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, feedback: vote, feedbackSubmitting: false } : r)));
+    } catch {
+      setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, feedbackSubmitting: false } : r)));
+    }
+  }
+
+  async function toggleStats() {
+    if (feedbackStats) {
+      setFeedbackStats(null);
+      return;
+    }
+    setStatsLoading(true);
+    try {
+      setFeedbackStats(await getFeedbackStats());
+    } finally {
+      setStatsLoading(false);
+    }
+  }
+
   const selectedRow = rows.find((r) => r.id === selectedId) ?? null;
 
   return (
@@ -63,7 +92,12 @@ export default function Home() {
         <p className="max-w-xl text-sm text-muted">
           Local, offline analysis of any photo — is it AI-generated? Select one photo or several at once.
         </p>
+        <button onClick={toggleStats} className="text-xs text-muted underline hover:text-accent" disabled={statsLoading}>
+          {feedbackStats ? "Hide feedback stats" : statsLoading ? "Loading…" : "View feedback stats"}
+        </button>
       </header>
+
+      {feedbackStats && <FeedbackStatsPanel stats={feedbackStats} />}
 
       {rows.length === 0 && <UploadZone onFiles={handleFiles} disabled={running} />}
 
@@ -76,7 +110,7 @@ export default function Home() {
             </div>
           )}
 
-          <ReportTable rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+          <ReportTable rows={rows} selectedId={selectedId} onSelect={setSelectedId} onVote={handleVote} />
 
           {selectedRow && (
             <div className="flex flex-col gap-6">

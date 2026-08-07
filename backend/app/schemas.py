@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from uuid import uuid4
+
+from pydantic import BaseModel, Field
 
 
 class ModelScoreOut(BaseModel):
@@ -52,6 +54,7 @@ class ProvenanceOut(BaseModel):
 
 
 class AnalyzeReport(BaseModel):
+    analysis_id: str = Field(default_factory=lambda: uuid4().hex)
     status: str  # always "ok" -- kept (rather than dropped) so existing API
     # consumers don't break on a missing key, but nothing sets it to anything
     # but "ok" anymore.
@@ -74,3 +77,32 @@ class ModelInfoOut(BaseModel):
     calibrated: bool
     model_accuracy: ModelAccuracyOut | None = None
     limitations: list[str]
+
+
+class FeedbackIn(BaseModel):
+    analysis_id: str
+    verdict: str
+    is_correct: bool
+
+
+class FeedbackOut(BaseModel):
+    status: str
+    analysis_id: str
+
+
+class VerdictBreakdownOut(BaseModel):
+    total: int
+    correct_pct: float | None = None
+    incorrect_pct: float | None = None
+
+
+class FeedbackStatsOut(BaseModel):
+    """Aggregate user feedback on verdict correctness (app/feedback_store.py).
+    correct_pct/incorrect_pct are None -- never 0.0 -- when there's no
+    feedback to measure them from, same discipline as calibration.py's
+    uncalibrated state and AEROBLADE's p_ai=None."""
+
+    total: int
+    correct_pct: float | None = None
+    incorrect_pct: float | None = None
+    by_verdict: dict[str, VerdictBreakdownOut] = {}

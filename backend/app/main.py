@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .calibration import load_calibration
 from .detectors.registry import ENSEMBLE_MODEL_NAMES
+from .feedback_store import get_stats, record_feedback
 from .pipeline import LIMITATIONS, _model_accuracy_out, analyze_image
-from .schemas import AnalyzeReport, ModelInfoOut
+from .schemas import AnalyzeReport, FeedbackIn, FeedbackOut, FeedbackStatsOut, ModelInfoOut
 
 logging.basicConfig(level=logging.INFO)
 
@@ -58,3 +59,14 @@ async def analyze(file: UploadFile = File(...)) -> AnalyzeReport:
     except Exception as e:
         logging.exception("analyze_image failed")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}") from e
+
+
+@app.post("/feedback", response_model=FeedbackOut)
+def submit_feedback(payload: FeedbackIn) -> FeedbackOut:
+    record_feedback(payload.analysis_id, payload.verdict, payload.is_correct)
+    return FeedbackOut(status="ok", analysis_id=payload.analysis_id)
+
+
+@app.get("/feedback/stats", response_model=FeedbackStatsOut)
+def feedback_stats() -> FeedbackStatsOut:
+    return get_stats()

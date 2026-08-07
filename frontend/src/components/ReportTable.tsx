@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReportRow } from "@/lib/reportRow";
+import type { FeedbackVote, ReportRow } from "@/lib/reportRow";
 import { VERDICT_COPY, BAND_COPY } from "@/lib/verdictCopy";
+import { FeedbackButtons } from "./FeedbackButtons";
 
 function StatusCell({ row }: { row: ReportRow }) {
   if (row.status === "pending") return <span className="text-xs text-muted">Queued</span>;
@@ -31,10 +32,12 @@ export function ReportTable({
   rows,
   selectedId,
   onSelect,
+  onVote,
 }: {
   rows: ReportRow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onVote: (rowId: string, vote: FeedbackVote) => void;
 }) {
   const doneCount = rows.filter((r) => r.status === "done" || r.status === "error").length;
 
@@ -53,6 +56,7 @@ export function ReportTable({
               <th className="py-2 pr-3 font-medium">Verdict</th>
               <th className="py-2 pr-3 font-medium">AI probability</th>
               <th className="py-2 pr-3 font-medium">Confidence</th>
+              <th className="py-2 pr-3 font-medium">Feedback</th>
             </tr>
           </thead>
           <tbody>
@@ -93,6 +97,18 @@ export function ReportTable({
                   </td>
                   <td className="py-2 pr-3 text-xs text-muted">
                     {row.report?.confidence_band ? BAND_COPY[row.report.confidence_band] : "—"}
+                  </td>
+                  <td className="py-2 pr-3">
+                    {row.report?.verdict ? (
+                      <FeedbackButtons
+                        compact
+                        feedback={row.feedback}
+                        submitting={!!row.feedbackSubmitting}
+                        onVote={(vote) => onVote(row.id, vote)}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
                   </td>
                 </tr>
               );
