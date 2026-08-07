@@ -9,10 +9,11 @@ eval set would flatter the ensemble -- see plan's "honest limitation" note):
   2. OwensLab/CommunityForensics-Eval -- the CVPR 2025 Community Forensics
      eval split, spanning many commercial/GAN/diffusion generators
      (MidjourneyV6_1, DFGAN, etc.) paired with COCO/LAION reals. This is a
-     general-image dataset, not face-specific, so every candidate is passed
-     through our own face_gate and only kept if it's a usable portrait --
-     that's a content filter (must be a face), independent of the real/fake
-     label, so it does not bias accuracy measurement.
+     general-image dataset, not face-specific -- every label-matching
+     candidate is kept directly (2026-08-06: this used to be filtered
+     through face_gate to keep only usable portraits; this project no
+     longer has face detection at all, so this source now contributes
+     arbitrary images, matching what pipeline.py actually analyzes).
 
 Label convention verified empirically on this dataset (do not trust field
 names blindly, same discipline as the Phase 0 polarity check): label=0 rows
@@ -40,8 +41,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image
 
-from app.detectors.face_gate import get_face_gate
-
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_DIR = ROOT / "data" / "eval"
 REAL_DIR = EVAL_DIR / "real"
@@ -62,7 +61,7 @@ KERNEL01_TARGET_EACH = 100
 # non-ffhq/stylegan AI count of 1 (a single stable_cascade sample) --
 # nowhere near enough to measure generalization to unseen generators.
 CF_EVAL_OFFSETS = list(range(0, 51800, 100))
-CF_EVAL_TARGET_EACH = 150  # per label, after face-gate filtering -- raised
+CF_EVAL_TARGET_EACH = 150  # per label -- raised
 # from 60 (itself barely reachable under the old, narrower offset range) so
 # the diverse-generator slice of data/eval/ has enough samples (target: >=30
 # non-ffhq/stylegan AI rows) to make a promotion decision statistically
@@ -126,21 +125,10 @@ def fetch_kernel01(manifest: list[tuple[str, str, str]]) -> None:
 
 
 def fetch_community_forensics(manifest: list[tuple[str, str, str]]) -> None:
-    print("=== OwensLab/CommunityForensics-Eval (face-gated) ===")
-    gate = get_face_gate()
-    real_count = ai_count = 0
+    print("=== OwensLab/CommunityForensics-Eval ===")
     real_kept = ai_kept = 0
 
     for offset in CF_EVAL_OFFSETS:
-        # Gate on *_kept (rows that actually passed face_gate), not *_count
-        # (rows merely examined) -- an earlier version of this loop gated on
-        # *_count here, which meant it stopped scanning as soon as
-        # CF_EVAL_TARGET_EACH candidates had been SEEN, almost all of which
-        # get rejected by face_gate (this source's yield rate is ~2-6%, per
-        # fetch_clip_train_set.py's docstring) -- so it silently produced
-        # far fewer kept images than the target implied (1 diverse AI row
-        # out of a target of 60). fetch_clip_train_set.py's copy of this
-        # same function already gates on *_kept; this ports that fix here.
         if real_kept >= CF_EVAL_TARGET_EACH and ai_kept >= CF_EVAL_TARGET_EACH:
             break
         url = (
@@ -164,24 +152,18 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]]) -> None:
                 continue
 
             if label == 0 and real_kept < CF_EVAL_TARGET_EACH:
-                gate_result = gate.run(img)
-                real_count += 1
-                if gate_result.status == "ok":
-                    fn = REAL_DIR / f"cfeval_{real_kept:04d}.jpg"
-                    img.save(fn, format="JPEG", quality=92)
-                    manifest.append((str(fn.relative_to(ROOT)), "real", r.get("real_source") or "unknown"))
-                    real_kept += 1
+                fn = REAL_DIR / f"cfeval_{real_kept:04d}.jpg"
+                img.save(fn, format="JPEG", quality=92)
+                manifest.append((str(fn.relative_to(ROOT)), "real", r.get("real_source") or "unknown"))
+                real_kept += 1
             elif label == 1 and ai_kept < CF_EVAL_TARGET_EACH:
-                gate_result = gate.run(img)
-                ai_count += 1
-                if gate_result.status == "ok":
-                    fn = AI_DIR / f"cfeval_{ai_kept:04d}.jpg"
-                    img.save(fn, format="JPEG", quality=92)
-                    manifest.append((str(fn.relative_to(ROOT)), "ai", model_name))
-                    ai_kept += 1
-        print(f"  offset={offset} real_seen={real_count} real_kept={real_kept}  ai_seen={ai_count} ai_kept={ai_kept}")
+                fn = AI_DIR / f"cfeval_{ai_kept:04d}.jpg"
+                img.save(fn, format="JPEG", quality=92)
+                manifest.append((str(fn.relative_to(ROOT)), "ai", model_name))
+                ai_kept += 1
+        print(f"  offset={offset} real_kept={real_kept}  ai_kept={ai_kept}")
 
-    print(f"  DONE real_kept={real_kept} (of {real_count} seen)  ai_kept={ai_kept} (of {ai_count} seen)")
+    print(f"  DONE real_kept={real_kept}  ai_kept={ai_kept}")
 
 
 def main() -> None:

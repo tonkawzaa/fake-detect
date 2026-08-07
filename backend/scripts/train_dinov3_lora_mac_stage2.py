@@ -95,10 +95,19 @@ DISTILL_WEIGHT = 1.0  # hand-picked -- F.mse_loss's default 'mean' reduction alr
 BATCH_SIZE = 4
 GRAD_ACCUM_STEPS = 8  # effective batch size 32, same as stage 1
 EVAL_BATCH_SIZE = 16
-LR_LORA = 1e-4
-LR_HEAD = 1e-3
-EPOCHS = 2  # fewer than stage 1's default -- this stage is a refinement of an
-# already-trained model, not training from scratch. See the timing-probe print.
+# 2026-08-06 retune, same values and same reasoning as stage 1's (see that
+# script's module docstring): LR_LORA at the bottom of a requested
+# 1e-5-2e-5 range now that LORA_R quadrupled to 32, plus explicit per-group
+# weight_decay (previously silently defaulted to AdamW's 0.01 on both
+# groups).
+LR_LORA = 1e-5
+LR_HEAD = 5e-4
+WD_LORA = 0.05
+WD_HEAD = 0.01
+EPOCHS = 1  # lowered from 2 in the same retune -- this stage warm-starts from
+# an already-trained stage-1 model and its job is a robustness refinement,
+# not further classification learning, so it needs even less of a nudge than
+# stage 1 does. See the timing-probe print.
 TIMING_PROBE_STEPS = 20
 PERTURB_SEED = 11997733 + 1  # deliberately different from SEED (stage-1's split
 # seed, imported from _dinov3_lora_mac_data) so perturbation randomness doesn't
@@ -236,7 +245,12 @@ def main() -> None:
     head_params = list(student.main_head.parameters())
     if student.aux_head is not None:
         head_params += list(student.aux_head.parameters())
-    optimizer = torch.optim.AdamW([{"params": lora_params, "lr": LR_LORA}, {"params": head_params, "lr": LR_HEAD}])
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": lora_params, "lr": LR_LORA, "weight_decay": WD_LORA},
+            {"params": head_params, "lr": LR_HEAD, "weight_decay": WD_HEAD},
+        ]
+    )
 
     aux_loss_weight = stage1_meta.get("aux_loss_weight", 0.3)
     print(f"\nTraining (self-distillation): {EPOCHS} epochs, batch_size={BATCH_SIZE}, "

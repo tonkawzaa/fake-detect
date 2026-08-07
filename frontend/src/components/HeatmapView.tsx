@@ -1,16 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { FaceOut } from "@/lib/types";
 
 export function HeatmapView({
   previewUrl,
   heatmapPng,
-  face,
 }: {
   previewUrl: string;
   heatmapPng: string | null;
-  face: FaceOut;
 }) {
   const [showHeatmap, setShowHeatmap] = useState(true);
 
@@ -37,20 +34,8 @@ export function HeatmapView({
       </div>
       {!heatmapPng && <p className="mt-2 text-center text-xs text-muted">Heatmap unavailable for this image.</p>}
       <p className="mt-3 text-xs text-muted">
-        Saliency map (gradient of the AI-probability logit w.r.t. input pixels) over{" "}
-        {face.bbox ? "the detected face crop" : "the whole frame (no face detected)"}
-        {face.quality && (
-          <> · face covers {(face.quality.coverage * 100).toFixed(0)}% of the frame, {face.quality.blur_label}</>
-        )}
-        .
+        Saliency map (gradient of the AI-probability logit w.r.t. input pixels) over the whole frame.
       </p>
-      {face.notes.length > 0 && (
-        <ul className="mt-2 text-xs text-muted">
-          {face.notes.map((note, i) => (
-            <li key={i}>· {note}</li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

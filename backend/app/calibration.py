@@ -1,7 +1,6 @@
 """
 Loads/saves app/calibration.json -- the single artifact produced by Phase 5
-(scripts/evaluate.py for the AI ensemble, scripts/calibrate_beauty.py for the
-beauty thresholds) and consumed at API startup.
+(scripts/evaluate.py for the AI ensemble) and consumed at API startup.
 
 Shape:
 {
@@ -12,10 +11,6 @@ Shape:
     "per_model_auc": {model_name: float},
     "accuracy": float, "auc": float, "n": int, "out_of_fold": true,
     "per_generator": {generator_name: accuracy}
-  },
-  "beauty": {
-    "thresholds": {feature_name: [midpoint, scale]},
-    "n_pairs": int
   },
   "reconstruction_aeroblade": {
     "platt": {"a": float, "b": float}, "threshold": float,

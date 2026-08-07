@@ -42,6 +42,16 @@ stated explicitly rather than silently changed:
     weights are exactly the weights that produced the reported accuracy --
     arguably a stronger honesty property than the refit scripts have, at
     half the compute.
+  - Per-epoch held-out accuracy is now printed (2026-08-06 retune, see
+    EPOCHS below) purely so a human can see the overfitting trend across
+    epochs on a future run. It is explicitly NOT used to pick which epoch's
+    weights get saved -- only the final epoch's weights are ever shipped,
+    and held_out_metrics in the written meta.json is the final epoch's
+    numbers, never a max over epochs. Selecting a checkpoint by scanning
+    epochs against the same held-out set this script then reports as "the"
+    accuracy would make that number a selected-max, not a measurement --
+    the same discipline scripts/evaluate.py's out-of-fold reporting exists
+    to protect elsewhere in this repo.
 
 Usage:
     uv run python scripts/fetch_clip_train_set.py   # once, if data/clip_train/ is empty or stale
@@ -87,14 +97,36 @@ ROOT = Path(__file__).resolve().parents[1]
 STAGE1_WEIGHTS_PATH = ROOT / "app" / "detectors" / "dinov3_lora_mac_stage1.safetensors"
 STAGE1_META_PATH = ROOT / "app" / "detectors" / "dinov3_lora_mac_stage1_meta.json"
 
-AUX_LOSS_WEIGHT = 0.3  # hand-picked, documented as such -- same "not learned" pattern as the beauty engine's fusion weights
+AUX_LOSS_WEIGHT = 0.3  # hand-picked, documented as such, not learned
 
 BATCH_SIZE = 4
 GRAD_ACCUM_STEPS = 8  # effective batch size 32
 EVAL_BATCH_SIZE = 16
-LR_LORA = 1e-4
-LR_HEAD = 1e-3
-EPOCHS = 3  # starting guess -- see the timing-probe print below before trusting this on a new machine
+# 2026-08-06 retune, per explicit request: LR_LORA lowered from 1e-4 to the
+# bottom of a requested 1e-5-2e-5 range (not the top) precisely because
+# LORA_R quadrupled (8 -> 32, see dinov3_lora_mac.py) -- more trainable
+# capacity argues for a SMALLER step on an already well-pretrained backbone,
+# not a larger one, if the goal is avoiding overfitting to the generators in
+# data/clip_train/. weight_decay is now set explicitly per param group
+# (previously absent, so both groups silently used AdamW's default 0.01) --
+# 0.05 on the LoRA/backbone group specifically to regularize the larger-rank
+# adapter, 0.01 kept on the head as before.
+LR_LORA = 1e-5
+LR_HEAD = 5e-4
+WD_LORA = 0.05
+WD_HEAD = 0.01
+# Lowered from 3 to 2 in the same retune -- the user's stated diagnosis was
+# that over-training is what causes overfitting to the generators seen in
+# training and hurts generalization to new ones; DINOv3's pretraining is
+# already strong, so this stage's job is a light nudge, not from-scratch
+# learning. Per-epoch held-out numbers are printed below (not used for
+# checkpoint selection -- see the module docstring's "held-out, never
+# out-of-fold" discipline: this repo does not pick a checkpoint by scanning
+# epochs against the same held-out set it then reports as the accuracy
+# number, since that would make the reported number a selected-max, not a
+# measurement) so a future run can pick a better EPOCHS from real data
+# instead of guessing again.
+EPOCHS = 2
 TIMING_PROBE_STEPS = 20
 
 
@@ -121,23 +153,50 @@ def main() -> None:
         f"Model built: {DINOV3_MODEL_NAME}, feature_dim={model.feature_dim}, "
         f"aux_classes={aux_classes}, LoRA target_modules={LORA_TARGET_MODULES}, r={LORA_R}, alpha={LORA_ALPHA}"
     )
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_total = sum(p.numel() for p in model.parameters())
+    print(f"Trainable parameters: {n_trainable:,} / {n_total:,} ({100 * n_trainable / n_total:.2f}%)")
 
     train_rows = [rows[i] for i in train_idx]
     train_aux = [aux_idx[i] for i in train_idx]
     heldout_rows = [rows[i] for i in heldout_idx]
     heldout_aux = [aux_idx[i] for i in heldout_idx]
 
+    heldout_generators = [rows[i][3] for i in heldout_idx]
+    heldout_families = [final_families[i] for i in heldout_idx]
+
     train_ds = ManifestDataset(train_rows, train_aux, model.transform)
     heldout_ds = ManifestDataset(heldout_rows, heldout_aux, model.transform)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     heldout_loader = DataLoader(heldout_ds, batch_size=EVAL_BATCH_SIZE, shuffle=False, num_workers=0)
+
+    def run_held_out_eval() -> dict:
+        """Log-only per-epoch signal, NOT checkpoint selection -- see the
+        EPOCHS comment above for why this repo doesn't pick a checkpoint by
+        scanning epochs against the same held-out set it reports as the
+        accuracy number. The final epoch's weights are always what gets
+        shipped and what held_out_metrics in the meta.json describes."""
+        model.eval()
+        all_probs, all_labels = [], []
+        with torch.no_grad():
+            for x, label, _aux_t in heldout_loader:
+                x = x.to(device)
+                main_logit, _ = model(x)
+                all_probs.extend(torch.sigmoid(main_logit).cpu().numpy().tolist())
+                all_labels.extend(label.numpy().tolist())
+        return compute_held_out_metrics(
+            np.array(all_probs), np.array(all_labels), heldout_generators, heldout_families, aux_classes
+        )
 
     lora_params = [p for p in model.backbone.parameters() if p.requires_grad]
     head_params = list(model.main_head.parameters())
     if model.aux_head is not None:
         head_params += list(model.aux_head.parameters())
     optimizer = torch.optim.AdamW(
-        [{"params": lora_params, "lr": LR_LORA}, {"params": head_params, "lr": LR_HEAD}]
+        [
+            {"params": lora_params, "lr": LR_LORA, "weight_decay": WD_LORA},
+            {"params": head_params, "lr": LR_HEAD, "weight_decay": WD_HEAD},
+        ]
     )
 
     print(f"\nTraining: {EPOCHS} epochs, batch_size={BATCH_SIZE}, grad_accum={GRAD_ACCUM_STEPS} "
@@ -189,28 +248,13 @@ def main() -> None:
         print(f"epoch {epoch + 1}/{EPOCHS}: mean main_loss={running_main_loss / n_batches:.4f} "
               f"mean aux_loss={running_aux_loss / n_batches:.4f}")
 
-    print("\nEvaluating on held-out split...")
-    model.eval()
-    all_probs, all_labels, all_generators, all_families = [], [], [], []
-    heldout_generators = [rows[i][3] for i in heldout_idx]
-    heldout_families = [final_families[i] for i in heldout_idx]
-    with torch.no_grad():
-        offset = 0
-        for x, label, _aux_t in heldout_loader:
-            x = x.to(device)
-            main_logit, _ = model(x)
-            probs = torch.sigmoid(main_logit).cpu().numpy()
-            bs = len(probs)
-            all_probs.extend(probs.tolist())
-            all_labels.extend(label.numpy().tolist())
-            all_generators.extend(heldout_generators[offset : offset + bs])
-            all_families.extend(heldout_families[offset : offset + bs])
-            offset += bs
+        epoch_metrics = run_held_out_eval()
+        print(f"  held-out after epoch {epoch + 1}: overall_accuracy={epoch_metrics['overall_accuracy']:.3f} "
+              f"diverse_accuracy={epoch_metrics['diverse_accuracy']:.3f} (n_diverse_ai={epoch_metrics['n_diverse_ai']}) "
+              "-- logged for visibility only, not used to pick a checkpoint")
 
-    metrics = compute_held_out_metrics(
-        np.array(all_probs), np.array(all_labels), all_generators, all_families, aux_classes
-    )
-    print(f"\nHeld-out overall accuracy: {metrics['overall_accuracy']:.3f}  AUC: {metrics['overall_auc']:.3f}  n={metrics['n']}")
+    metrics = epoch_metrics
+    print(f"\nHeld-out overall accuracy (final epoch): {metrics['overall_accuracy']:.3f}  AUC: {metrics['overall_auc']:.3f}  n={metrics['n']}")
     print(f"  core (ffhq/stylegan) accuracy: {metrics['core_accuracy']:.3f}  n={metrics['n_core']}")
     print(f"  diverse (other generators) accuracy: {metrics['diverse_accuracy']:.3f}  n={metrics['n_diverse']}  n_diverse_ai={metrics['n_diverse_ai']}")
     for cls, d in metrics["per_generator_family_accuracy"].items():

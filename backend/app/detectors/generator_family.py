@@ -35,8 +35,7 @@ LCM_lora_ssd1b, LCM_lora_sdv15, stable_cascade, kandinsky_2_2, FLUX-dev; this
 repo's own StyleGAN/DFGAN sources) plus well-known commercial/open generator
 names likely to appear once data/clip_train/'s CF-Eval slice is scanned more
 broadly (MidjourneyV6_1, DALL-E, Imagen, Firefly). This is a hand-maintained,
-documented mapping -- same "hand-picked, not learned" pattern as the beauty
-engine's fusion formula (app/beauty/score.py) -- not an attempt at a
+documented mapping, hand-picked rather than learned -- not an attempt at a
 complete taxonomy. Anything not matched falls into "other-ai" by design,
 so an unrecognized generator name from a freshly-fetched manifest degrades
 to a coarser-than-ideal bucket rather than crashing training.

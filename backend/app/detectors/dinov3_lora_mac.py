@@ -83,8 +83,16 @@ import torch.nn as nn
 from .dinov3_features import DINOV3_MODEL_NAME, pool_dinov3_tokens
 
 LORA_TARGET_MODULES = ("attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2")
-LORA_R = 8
-LORA_ALPHA = 16
+# r=32/alpha=64 (alpha = 2*r, a common default) per explicit request, matching
+# ranks reported by other teams (Shallow Real, Ant International) doing LoRA
+# fine-tuning of ViT backbones for this task -- trains ~1-3% of total
+# parameters while approaching full-fine-tune accuracy. Was r=8/alpha=16
+# before the 2026-08-06 retune; see scripts/train_dinov3_lora_mac_stage1.py's
+# module docstring for the paired learning-rate/weight-decay changes and the
+# reasoning (avoid overfitting a well-pretrained backbone to the generators
+# seen in data/clip_train/).
+LORA_R = 32
+LORA_ALPHA = 64
 LORA_DROPOUT = 0.05
 
 

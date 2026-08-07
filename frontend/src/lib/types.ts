@@ -2,9 +2,7 @@
 
 export interface ModelScoreOut {
   name: string;
-  ai_probability_full: number;
-  ai_probability_face: number | null; // null when no usable face was found
-  ai_probability_combined: number;
+  ai_probability: number;
   weight: number;
   eval_auc: number | null;
 }
@@ -16,31 +14,6 @@ export interface ModelAccuracyOut {
   out_of_fold: boolean;
   per_generator: Record<string, number> | null;
   note: string | null;
-}
-
-export interface BeautyOut {
-  score: number;
-  level: "None" | "Light" | "Moderate" | "Heavy" | string;
-  subscores: Record<string, number>;
-  raw: Record<string, number>;
-  guard_multiplier: number;
-  notes: string[];
-  calibrated: boolean;
-}
-
-export interface FaceQualityOut {
-  width: number;
-  height: number;
-  blur_score: number;
-  blur_label: string;
-  coverage: number;
-}
-
-export interface FaceOut {
-  count: number;
-  bbox: [number, number, number, number] | null;
-  quality: FaceQualityOut | null;
-  notes: string[];
 }
 
 export interface ReconstructionCheckOut {
@@ -67,7 +40,7 @@ export interface ProvenanceOut {
 }
 
 export interface AnalyzeReport {
-  status: "ok"; // always "ok" as of 2026-07-30 -- face_gate no longer gates the request; see `face` for face-detection info
+  status: "ok"; // always "ok" -- kept for API back-compat, nothing sets it to anything else
   message: string;
   verdict: "likely_ai" | "likely_real" | "uncertain" | null;
   ai_probability: number | null;
@@ -76,8 +49,6 @@ export interface AnalyzeReport {
   verdict_source: "ensemble" | "c2pa" | "xmp" | string;
   models: ModelScoreOut[];
   model_accuracy: ModelAccuracyOut | null;
-  beauty: BeautyOut | null;
-  face: FaceOut;
   provenance: ProvenanceOut | null;
   heatmap_png: string | null;
   reconstruction_check: ReconstructionCheckOut | null;
@@ -88,6 +59,5 @@ export interface ModelInfoOut {
   ensemble_models: string[];
   calibrated: boolean;
   model_accuracy: ModelAccuracyOut | null;
-  beauty_calibrated: boolean;
   limitations: string[];
 }

@@ -8,8 +8,8 @@
       "mlp.fc1",
       "mlp.fc2"
     ],
-    "r": 8,
-    "alpha": 16,
+    "r": 32,
+    "alpha": 64,
     "dropout": 0.05
   },
   "aux_classes": [
@@ -19,36 +19,36 @@
   ],
   "aux_loss_weight": 0.3,
   "distill_weight": 1.0,
-  "n_train": 2160,
-  "epochs": 2,
+  "n_train": 2400,
+  "epochs": 1,
   "held_out_metrics": {
-    "overall_accuracy": 0.9907578558225508,
-    "overall_auc": 0.9998359983599836,
-    "n": 541,
-    "core_accuracy": 0.9911699779249448,
-    "n_core": 453,
-    "diverse_accuracy": 0.9886363636363636,
-    "n_diverse": 88,
-    "n_diverse_ai": 71,
+    "overall_accuracy": 0.965,
+    "overall_auc": 0.9959333333333333,
+    "n": 600,
+    "core_accuracy": 0.9537037037037037,
+    "n_core": 432,
+    "diverse_accuracy": 0.9940476190476191,
+    "n_diverse": 168,
+    "n_diverse_ai": 97,
     "per_generator_family_accuracy": {
       "diffusion": {
-        "n": 70,
+        "n": 65,
         "accuracy": 1.0
       },
       "gan": {
-        "n": 200,
-        "accuracy": 1.0
+        "n": 230,
+        "accuracy": 0.991304347826087
       },
       "other-ai": {
-        "n": 1,
+        "n": 5,
         "accuracy": 1.0
       }
     },
     "held_out": true
   },
   "perturbed_accuracy": {
-    "teacher_stage1": 0.8373382624768947,
-    "student_stage2": 0.9722735674676525,
-    "n": 541
+    "teacher_stage1": 0.8233333333333334,
+    "student_stage2": 0.915,
+    "n": 600
   }
 }

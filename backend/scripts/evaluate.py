@@ -31,8 +31,6 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
 from app.calibration import save_calibration
-from app.detectors.ai_detector import crop_face
-from app.detectors.face_gate import get_face_gate
 from app.detectors.registry import build_ensemble
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,8 +54,7 @@ def load_manifest() -> list[tuple[Path, int, str]]:
 
 
 def compute_model_scores(rows: list[tuple[Path, int, str]]) -> tuple[np.ndarray, list[str], np.ndarray, list[str]]:
-    """Returns (combined_scores [N, M], model_names, labels [N], generators [N])."""
-    gate = get_face_gate()
+    """Returns (scores [N, M], model_names, labels [N], generators [N])."""
     adapters = build_ensemble()
     for a in adapters:
         a.load()
@@ -66,26 +63,16 @@ def compute_model_scores(rows: list[tuple[Path, int, str]]) -> tuple[np.ndarray,
     scores = []
     labels = []
     generators = []
-    skipped = 0
     for i, (path, label, generator) in enumerate(rows):
         img = Image.open(path).convert("RGB")
-        g = gate.run(img)
-        if g.status != "ok":
-            skipped += 1
-            continue
-        face_crop = crop_face(img, g.face.bbox_px)
-        row_scores = []
-        for a in adapters:
-            p_full = a.predict(img)
-            p_face = a.predict(face_crop)
-            row_scores.append((p_full + p_face) / 2.0)
+        row_scores = [a.predict(img) for a in adapters]
         scores.append(row_scores)
         labels.append(label)
         generators.append(generator)
         if (i + 1) % 40 == 0:
-            print(f"  scored {i + 1}/{len(rows)} (skipped {skipped})")
+            print(f"  scored {i + 1}/{len(rows)}")
 
-    print(f"  scored {len(scores)}/{len(rows)} total (skipped {skipped} that failed the face gate)")
+    print(f"  scored {len(scores)}/{len(rows)} total")
     return np.array(scores), model_names, np.array(labels), generators
 
 
@@ -116,7 +103,7 @@ def main() -> None:
     rows = load_manifest()
     print(f"Loaded manifest: {len(rows)} images")
 
-    print("Scoring all images with the ensemble (two crops each)...")
+    print("Scoring all images with the ensemble...")
     combined_scores, model_names, labels, generators = compute_model_scores(rows)
     n = len(labels)
 

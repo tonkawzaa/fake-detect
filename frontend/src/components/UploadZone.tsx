@@ -57,7 +57,7 @@ export function UploadZone({
       >
         <div className="text-4xl">📷</div>
         <p className="text-base font-medium">Drop one or more portrait photos here, or click to browse</p>
-        <p className="text-sm text-muted">JPG, PNG, or WEBP · up to 15MB each · one face per photo works best</p>
+        <p className="text-sm text-muted">JPG, PNG, or WEBP · up to 15MB each</p>
         <input
           ref={inputRef}
           type="file"

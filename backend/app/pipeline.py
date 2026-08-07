@@ -1,24 +1,15 @@
 """
-Orchestrates one /analyze request: face gate (informational only, see below)
--> AI ensemble + beauty engine + provenance -> fused report. Each analysis
-stage is independent (a failure in provenance parsing shouldn't take down
-the AI verdict), so stages are wrapped defensively and degrade to
-"unavailable" rather than 500ing the whole request.
+Orchestrates one /analyze request: AI ensemble + provenance -> fused report.
+Each analysis stage is independent (a failure in provenance parsing
+shouldn't take down the AI verdict), so stages are wrapped defensively and
+degrade to "unavailable" rather than 500ing the whole request.
 
-2026-07-30: face_gate no longer gates the request. This tool used to refuse
-to analyze anything without a detected face ("no_face"/"low_quality"
-statuses short-circuited with no scores at all) -- it now analyzes any
-image, full-frame-only when no usable face is present. face_gate's output
-is still computed and still informs two things: (1) the AI-detection
-ensemble's face-crop pass (app/detectors/ai_detector.py) runs only when a
-face was found AND passed face_gate's size/quality check -- a tiny bbox
-crop would be an out-of-distribution input the calibration was never fit
-on, not just a "noisier" one; (2) the beauty engine, which structurally
-requires FaceMesh landmarks and a reasonably-sized face region, gates on
-the same condition and is simply absent (not an error) otherwise.
-AnalyzeReport.status is now always "ok" for any image this function
-finishes analyzing -- face.count/face.notes carry the "no face was found"
-fact as metadata instead of a blocking verdict.
+2026-08-06: face detection (face_gate, MediaPipe FaceLandmarker) and the
+beauty/retouching-filter engine were removed from the project entirely, per
+explicit request. This tool analyzes any image, full-frame only -- there is
+no face-crop pass for the AI-detection ensemble anymore and no beauty score.
+AnalyzeReport.status is always "ok" for any image this function finishes
+analyzing.
 """
 
 from __future__ import annotations
@@ -26,15 +17,10 @@ from __future__ import annotations
 import io
 import logging
 
-import numpy as np
 from PIL import Image
 
-from .beauty.features import compute_all_features
-from .beauty.regions import build_face_regions
-from .beauty.score import score_beauty
 from .calibration import load_calibration
 from .detectors.ai_detector import get_ensemble
-from .detectors.face_gate import get_face_gate
 from .detectors.heatmap import compute_saliency_map, render_overlay_png_base64
 from .detectors.reconstruction import get_reconstruction_detector
 from .detectors.registry import build_ensemble
@@ -42,9 +28,6 @@ from .forensics.credentials import read_c2pa
 from .forensics.metadata import read_exif, read_xmp
 from .schemas import (
     AnalyzeReport,
-    BeautyOut,
-    FaceOut,
-    FaceQualityOut,
     ModelAccuracyOut,
     ModelScoreOut,
     ProvenanceOut,
@@ -58,8 +41,6 @@ LIMITATIONS = [
     "zero-shot open detector around 75% mean accuracy across generators.",
     "Detection accuracy drops sharply on the newest commercial generators "
     "(e.g. Flux Dev, Midjourney v7, Firefly v4) -- as low as 18-30% in published benchmarks.",
-    "The beauty-mode score is a transparent heuristic over pixel statistics, not a "
-    "trained classifier -- treat it as an indicator to inspect, not a verdict.",
 ]
 
 
@@ -81,43 +62,15 @@ def analyze_image(image_bytes: bytes) -> AnalyzeReport:
     pil_image = Image.open(io.BytesIO(image_bytes))
     pil_image.load()
 
-    gate = get_face_gate()
-    gate_result = gate.run(pil_image)
-    # A face crop is only handed to the AI ensemble / beauty engine when
-    # face_gate found a face AND it passed the size/quality check -- a tiny
-    # bbox crop would be an out-of-distribution input those were never fit
-    # on, not just a noisier one. See pipeline.py's module docstring.
-    usable_face = gate_result.status == "ok"
-
-    face_out = FaceOut(
-        count=gate_result.face_count,
-        bbox=gate_result.face.bbox_px if gate_result.face else None,
-        quality=(
-            FaceQualityOut(
-                width=gate_result.quality.width,
-                height=gate_result.quality.height,
-                blur_score=gate_result.quality.blur_score,
-                blur_label=gate_result.quality.blur_label,
-                coverage=gate_result.quality.coverage,
-            )
-            if gate_result.quality
-            else None
-        ),
-        notes=gate_result.notes,
-    )
-
     # --- AI detection -----------------------------------------------------
     ensemble = get_ensemble()
     ensemble.set_calibration(calibration.get("ai_ensemble"))
     try:
-        bbox_for_ai = gate_result.face.bbox_px if usable_face else None
-        ai_result = ensemble.analyze(pil_image, bbox_for_ai)
+        ai_result = ensemble.analyze(pil_image)
         models_out = [
             ModelScoreOut(
                 name=m.name,
-                ai_probability_full=m.p_ai_full,
-                ai_probability_face=m.p_ai_face,
-                ai_probability_combined=m.p_ai_combined,
+                ai_probability=m.p_ai,
                 weight=m.weight,
                 eval_auc=m.eval_auc,
             )
@@ -192,13 +145,6 @@ def analyze_image(image_bytes: bytes) -> AnalyzeReport:
             logger.exception("Reconstruction-error check failed")
 
     # --- heatmap (best-effort; failures shouldn't break the report) -----
-    # Saliency is computed over the face crop when a usable face is present
-    # (sharper, more relevant signal) and over the whole frame otherwise --
-    # this is the only reason usable_face vs. bare gate_result.face matters
-    # here: a low-quality tiny face is still a valid crop *region* for a
-    # heatmap (unlike for the AI ensemble/beauty engine, there's no
-    # calibration or landmark-shape assumption at stake), so it uses
-    # gate_result.face directly rather than the stricter usable_face gate.
     heatmap_png = None
     try:
         adapters = build_ensemble()
@@ -206,37 +152,10 @@ def analyze_image(image_bytes: bytes) -> AnalyzeReport:
             primary = adapters[0]
             if not hasattr(primary, "model"):
                 primary.load()
-            if gate_result.face is not None:
-                bx, by, bw, bh = gate_result.face.bbox_px
-                heatmap_source = pil_image.crop((bx, by, bx + bw, by + bh))
-            else:
-                heatmap_source = pil_image
-            saliency = compute_saliency_map(primary, heatmap_source)
-            heatmap_png = render_overlay_png_base64(heatmap_source, saliency)
+            saliency = compute_saliency_map(primary, pil_image)
+            heatmap_png = render_overlay_png_base64(pil_image, saliency)
     except Exception:
         logger.exception("Heatmap generation failed")
-
-    # --- beauty engine (requires FaceMesh landmarks from a usable face) ----
-    beauty_out = None
-    if usable_face:
-        try:
-            rgb = np.array(pil_image.convert("RGB"))
-            regions = build_face_regions(gate_result.face.landmarks_norm, pil_image.width, pil_image.height)
-            raw_features = compute_all_features(rgb, gate_result.face.landmarks_norm, regions)
-            beauty_cal = calibration.get("beauty") or {}
-            thresholds = {k: tuple(v) for k, v in beauty_cal.get("thresholds", {}).items()}
-            beauty_report = score_beauty(raw_features, thresholds=thresholds or None)
-            beauty_out = BeautyOut(
-                score=beauty_report.score,
-                level=beauty_report.level,
-                subscores=beauty_report.subscores,
-                raw=beauty_report.raw,
-                guard_multiplier=beauty_report.guard_multiplier,
-                notes=beauty_report.notes,
-                calibrated=bool(beauty_cal.get("thresholds")),
-            )
-        except Exception:
-            logger.exception("Beauty engine failed")
 
     return AnalyzeReport(
         status="ok",
@@ -248,8 +167,6 @@ def analyze_image(image_bytes: bytes) -> AnalyzeReport:
         calibrated=calibrated,
         models=models_out,
         model_accuracy=_model_accuracy_out(calibration),
-        beauty=beauty_out,
-        face=face_out,
         provenance=provenance_out,
         heatmap_png=heatmap_png,
         reconstruction_check=reconstruction_out,

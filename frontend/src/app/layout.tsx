@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Portrait Detector",
-  description: "Local AI-generated portrait & beauty-filter detection",
+  title: "AI Image Detector",
+  description: "Local AI-generated image detection",
 };
 
 export default function RootLayout({

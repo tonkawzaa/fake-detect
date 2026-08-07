@@ -4,56 +4,24 @@
       "dinov3-vit-l16-lora-mac": 1.0
     },
     "platt": {
-      "a": 2.518697720066695,
-      "b": 0.3201517726454251
+      "a": 2.2756398008006995,
+      "b": -1.8906432924677323
     },
     "threshold": 0.5,
     "per_model_auc": {
-      "dinov3-vit-l16-lora-mac": 0.9994775510204081
+      "dinov3-vit-l16-lora-mac": 0.997072
     },
-    "accuracy": 0.9919191919191919,
-    "auc": 0.9991183673469388,
-    "n": 495,
+    "accuracy": 0.978,
+    "auc": 0.9966079999999999,
+    "n": 500,
     "out_of_fold": true,
     "per_generator": {
       "DFGAN": 1.0,
       "LAION": 0.9733333333333334,
-      "MidjourneyV5_2": 1.0,
-      "ffhq": 1.0,
+      "MidjourneyV5_2": 0.9801980198019802,
+      "ffhq": 0.96,
       "stable_cascade": 1.0,
-      "stylegan": 1.0
+      "stylegan": 0.99
     }
-  },
-  "beauty": {
-    "thresholds": {
-      "f1_skin_hf_ratio": [
-        2.8778673970541613,
-        4.947190008481068
-      ],
-      "f2_noise_residual": [
-        1.453315116573176,
-        0.34558364502108346
-      ],
-      "f3_lbp_entropy_drop": [
-        0.056521700237594695,
-        0.036969816151345807
-      ],
-      "f4_fft_highfreq": [
-        0.0005900165701264247,
-        0.0008877895945422002
-      ],
-      "f6_tone_uniformity": [
-        0.35357677019516154,
-        0.10461788324788317
-      ],
-      "f8_contour_warp": [
-        0.0,
-        0.045841528145326875
-      ]
-    },
-    "source": "synthetic_bootstrap",
-    "n_on": 79,
-    "n_off": 79,
-    "separation_check": "off mean=0.486, on mean=0.598"
   }
 }

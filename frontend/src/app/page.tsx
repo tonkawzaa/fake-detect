@@ -4,7 +4,6 @@ import { useState } from "react";
 import { UploadZone } from "@/components/UploadZone";
 import { ReportTable } from "@/components/ReportTable";
 import { VerdictCard } from "@/components/VerdictCard";
-import { BeautyPanel } from "@/components/BeautyPanel";
 import { ProvenancePanel } from "@/components/ProvenancePanel";
 import { ModelBreakdown } from "@/components/ModelBreakdown";
 import { HeatmapView } from "@/components/HeatmapView";
@@ -62,8 +61,7 @@ export default function Home() {
       <header className="flex flex-col items-center gap-2 text-center">
         <h1 className="text-2xl font-bold sm:text-3xl">AI Image Detector</h1>
         <p className="max-w-xl text-sm text-muted">
-          Local, offline analysis of any photo — is it AI-generated? Portraits also get a beauty/retouching-filter
-          score, since that check needs a detected face. Select one photo or several at once.
+          Local, offline analysis of any photo — is it AI-generated? Select one photo or several at once.
         </p>
       </header>
 
@@ -90,8 +88,7 @@ export default function Home() {
               ) : selectedRow.report ? (
                 <>
                   <VerdictCard report={selectedRow.report} />
-                  <HeatmapView previewUrl={selectedRow.previewUrl} heatmapPng={selectedRow.report.heatmap_png} face={selectedRow.report.face} />
-                  {selectedRow.report.beauty && <BeautyPanel beauty={selectedRow.report.beauty} />}
+                  <HeatmapView previewUrl={selectedRow.previewUrl} heatmapPng={selectedRow.report.heatmap_png} />
                   {selectedRow.report.provenance && <ProvenancePanel provenance={selectedRow.report.provenance} />}
                   <ModelBreakdown models={selectedRow.report.models} />
                   <LimitationsFooter limitations={selectedRow.report.limitations} />

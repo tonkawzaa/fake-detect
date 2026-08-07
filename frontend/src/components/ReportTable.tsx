@@ -2,7 +2,6 @@
 
 import type { ReportRow } from "@/lib/reportRow";
 import { VERDICT_COPY, BAND_COPY } from "@/lib/verdictCopy";
-import { BEAUTY_LEVEL_COLOR } from "./BeautyPanel";
 
 function StatusCell({ row }: { row: ReportRow }) {
   if (row.status === "pending") return <span className="text-xs text-muted">Queued</span>;
@@ -54,7 +53,6 @@ export function ReportTable({
               <th className="py-2 pr-3 font-medium">Verdict</th>
               <th className="py-2 pr-3 font-medium">AI probability</th>
               <th className="py-2 pr-3 font-medium">Confidence</th>
-              <th className="py-2 pr-3 font-medium">Beauty filter</th>
             </tr>
           </thead>
           <tbody>
@@ -95,16 +93,6 @@ export function ReportTable({
                   </td>
                   <td className="py-2 pr-3 text-xs text-muted">
                     {row.report?.confidence_band ? BAND_COPY[row.report.confidence_band] : "—"}
-                  </td>
-                  <td className="py-2 pr-3">
-                    {row.report?.beauty ? (
-                      <Badge
-                        label={`${row.report.beauty.level} (${(row.report.beauty.score * 100).toFixed(0)}%)`}
-                        colorVar={BEAUTY_LEVEL_COLOR[row.report.beauty.level] ?? "--accent"}
-                      />
-                    ) : (
-                      <span className="text-xs text-muted">—</span>
-                    )}
                   </td>
                 </tr>
               );

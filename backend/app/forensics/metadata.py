@@ -3,8 +3,8 @@ Phase 4: EXIF + raw XMP metadata.
 
 Presence of camera EXIF is weak-to-moderate evidence of a real capture
 (though social platforms strip EXIF on upload, so absence proves little).
-A `Software` tag naming an editor/beauty app is a useful cross-check against
-the beauty-mode engine's own (purely pixel-based) signal.
+A `Software` tag naming a known editor/beauty app is a useful independent
+signal that the image went through post-processing.
 
 Separately, `read_xmp` reads the IPTC `Iptc4xmpExt:DigitalSourceType` property
 straight out of an image's embedded XMP packet -- the same IPTC NewsCode

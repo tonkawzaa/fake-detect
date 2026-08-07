@@ -32,18 +32,13 @@ as indicative, not as a tight estimate; scripts/calibrate_reconstruction.py's
 polarity assertion is what actually matters here, more than the precise
 accuracy number.
 
-Deliberately NOT face-gated, unlike every other fetch_*.py script in this
-repo: a first pass that required face_gate to pass kept only 2 of the 80
-SD-VAE-compatible AI images (this dataset's SD-family generations are
-mostly general scenes, not portraits) -- nowhere near enough to calibrate.
-AEROBLADE's reconstruction-error mechanism is not face-specific at all (it
-doesn't touch face_gate's face-quality logic in any way), so this is a
-smaller compromise than it looks -- but it does mean the calibration
-population is content-mismatched from what pipeline.py actually calls this
-detector on (portraits that already passed face_gate, only when the main
-ensemble is "uncertain"). If face content changes reconstruction-error
-statistics, this calibration underrepresents that; there wasn't enough
-SD-VAE-compatible portrait data available to test that assumption.
+Never face-gated -- this dataset's SD-family generations are mostly general
+scenes, not portraits (a first pass that required a detected face kept only
+2 of the 80 SD-VAE-compatible AI images, nowhere near enough to calibrate),
+and AEROBLADE's reconstruction-error mechanism is not face-specific at all.
+2026-08-06: face detection was removed from the project entirely, so this
+is no longer a special case relative to the other fetch_*.py scripts --
+none of them filter on face content anymore either.
 
 Disjoint (content-hash checked) from data/eval/ and data/clip_train/, same
 guard pattern as fetch_clip_train_set.py, for data hygiene consistency

@@ -12,7 +12,7 @@ from .schemas import AnalyzeReport, ModelInfoOut
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="AI Portrait Detector", version="0.1.0")
+app = FastAPI(title="AI Image Detector", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,7 +38,6 @@ def model_info() -> ModelInfoOut:
         ensemble_models=list(ENSEMBLE_MODEL_NAMES),
         calibrated=ai_cal.get("platt") is not None,
         model_accuracy=_model_accuracy_out(calibration),
-        beauty_calibrated=bool((calibration.get("beauty") or {}).get("thresholds")),
         limitations=LIMITATIONS,
     )
 

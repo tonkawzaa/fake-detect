@@ -44,8 +44,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image
 
-from app.detectors.face_gate import get_face_gate
-
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_DIR = ROOT / "data" / "eval"
 TRAIN_DIR = ROOT / "data" / "clip_train"
@@ -59,52 +57,54 @@ MANIFEST_PATH = TRAIN_DIR / "manifest.csv"
 # wasting downloads on images we'd throw away anyway.
 #
 # KERNEL01_TARGET_EACH carries the bulk of the ~1000/1000 target: it's a
-# dedicated, pre-cropped face dataset (FFHQ real vs. StyleGAN fake), so it's
-# both the cheapest source (no face_gate needed -- see fetch_kernel01, it
-# trusts the dataset's own framing) and the most reliably "a portrait" of
-# the two sources. Test split has 20,000 rows total (confirmed via HF
-# datasets-server /size), well-interleaved by label even at high offsets
-# (spot-checked at offset=15000) -- 20000 is set as the hard cap below
-# specifically because that's the split's actual size, not an arbitrary
-# round number.
+# dedicated, pre-cropped face dataset (FFHQ real vs. StyleGAN fake). Test
+# split has 20,000 rows total (confirmed via HF datasets-server /size),
+# well-interleaved by label even at high offsets (spot-checked at
+# offset=15000) -- 20000 is set as the hard cap below specifically because
+# that's the split's actual size, not an arbitrary round number.
 KERNEL01_OFFSET_START = 3000
 KERNEL01_TARGET_EACH = 1000
 
 # CF-eval is a general-image dataset (COCO/LAION reals paired with many
-# commercial/GAN/diffusion generators) filtered through face_gate, so it's
-# the source for generator diversity beyond StyleGAN -- at the cost of a
-# low portrait-yield rate (6% real / 2% ai observed on the first 150-per-label
-# scan: 9/150 real, 3/150 ai kept after face-gating).
+# commercial/GAN/diffusion generators), the source for generator diversity
+# beyond StyleGAN. 2026-08-06: this used to be filtered through face_gate
+# (kept only if a usable portrait was detected), which this project no
+# longer has -- every label-matching candidate is now kept directly, so
+# real_kept/ai_kept below are just running counts, not a "kept of seen"
+# yield.
 #
 # CF_TRAIN_OFFSETS steps by 100 = the HF datasets-server /rows endpoint's max
 # `length` (confirmed empirically: length=200 is rejected with "must not be
 # greater than 100") -- offset step must equal length for a contiguous scan.
-# An earlier version of this constant stepped by 400 while only fetching
-# length=40 per request, silently skipping 360 of every 400 rows -- that,
-# combined with the target-vs-seen bug below, is why the first run plateaued
-# at 9/3 kept instead of anywhere near CF_TRAIN_TARGET_EACH.
 CF_TRAIN_OFFSETS = list(range(0, 51800, 100))
 
-# This is a KEPT-count target (see fetch_community_forensics: the stopping
-# condition below now checks real_kept/ai_kept, not how many rows were
-# merely examined) -- reaching it requires scanning roughly kept/yield_rate
-# candidates per label. Raised back up from 100 (itself a deliberate
-# reduction from an original 310, "trading generator-diversity breadth for
-# a much shorter scan") for the DINOv3-LoRA-MAC restructuring: a LoRA
-# fine-tune and a generator-family MAC aux head both need real
-# generator diversity to be anything other than "is it StyleGAN" in
-# disguise (see CLAUDE.md's account of why the pre-diversification
-# data/clip_train/ -- 99.4% ffhq/stylegan, n=2012 -- was a load-bearing
-# blocker for that restructuring). fetch_eval_set.py's freshly-fixed
-# CF_EVAL fetch (same offset-stepping bugfix as this file already had)
-# measured actual yield rates of ~7.7% real / ~5.8% ai on this exact HF
-# source -- both meaningfully better than the ~2%/6% this comment
-# previously assumed -- so 500 kept-each is comfortably reachable within
-# the 51,836-row split scanned by CF_TRAIN_OFFSETS above, without needing
-# to widen that range further.
+# Raised back up from 100 (itself a deliberate reduction from an original
+# 310, "trading generator-diversity breadth for a much shorter scan") for
+# the DINOv3-LoRA-MAC restructuring: a LoRA fine-tune and a generator-family
+# MAC aux head both need real generator diversity to be anything other than
+# "is it StyleGAN" in disguise (see CLAUDE.md's account of why the
+# pre-diversification data/clip_train/ -- 99.4% ffhq/stylegan, n=2012 -- was
+# a load-bearing blocker for that restructuring).
+#
+# 2026-08-06: with face_gate filtering removed, every label-matching row is
+# kept, so this target used to be satisfied almost immediately -- in
+# practice, entirely by DFGAN + StyleGAN from the first ~1500 rows of the
+# split, silently reintroducing the exact narrowness the 2026-08-01
+# diversification effort existed to fix (measured: a first face_gate-free
+# run produced ai rows that were 100% DFGAN/StyleGAN, zero diffusion-model
+# generators). CF_TRAIN_PER_GENERATOR_CAP below forces the scan to keep
+# going deeper into the split rather than stopping as soon as the first
+# couple of generators fill the quota -- at cap=150, reaching
+# CF_TRAIN_TARGET_EACH=500 per label requires rows from at least 4 distinct
+# generators, so diversity is structural rather than incidental. This
+# necessarily means scanning much further into the 51,836-row split than
+# the pre-cap version did (slower, more HTTP requests), which is the
+# deliberate trade this makes.
 CF_TRAIN_TARGET_EACH = 500
+CF_TRAIN_PER_GENERATOR_CAP = 150
 
 HTTP_RETRIES = 3
+RATE_LIMIT_RETRIES = 6  # see _get_json's docstring -- 429s get their own, longer backoff budget
 
 
 def existing_hashes(*dirs: Path) -> set[str]:
@@ -124,16 +124,40 @@ def _get_json(url: str):
     which used to escape this function's retry loop entirely and crash the
     whole script (observed: crashed at offset 2800 having read 170MB of a
     ~200MB response, losing all not-yet-written progress on a scan that
-    was, by design, going to take a long time to reach its target)."""
+    was, by design, going to take a long time to reach its target).
+
+    2026-08-06: HTTP 429 (rate limit) needs its own, much longer backoff --
+    a flat 2s retry (fine for transient network blips) just re-triggers the
+    same 429 immediately under sustained rate limiting, observed to burn
+    through dozens of offsets making zero progress once HF started
+    throttling this unauthenticated client (see CF_TRAIN_PER_GENERATOR_CAP's
+    deeper scan above, which issues far more requests than the pre-cap
+    version did). Honors a `Retry-After` header when HF sends one, else
+    backs off exponentially (5s, 10s, 20s, ...) up to RATE_LIMIT_RETRIES
+    attempts specifically for 429s, separate from HTTP_RETRIES for other
+    transient errors."""
     last_err = None
-    for _ in range(HTTP_RETRIES):
+    generic_attempt = 0
+    rate_limit_attempt = 0
+    while generic_attempt < HTTP_RETRIES and rate_limit_attempt < RATE_LIMIT_RETRIES:
         try:
             with urllib.request.urlopen(url, timeout=30) as resp:
                 import json
 
                 return json.load(resp)
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, http.client.HTTPException) as e:
+        except urllib.error.HTTPError as e:
             last_err = e
+            if e.code == 429:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                wait = float(retry_after) if retry_after else min(5 * (2**rate_limit_attempt), 60)
+                rate_limit_attempt += 1
+                time.sleep(wait)
+            else:
+                generic_attempt += 1
+                time.sleep(2)
+        except (urllib.error.URLError, TimeoutError, http.client.HTTPException) as e:
+            last_err = e
+            generic_attempt += 1
             time.sleep(2)
     print(f"  WARN: giving up on {url[:100]}...: {last_err}")
     return None
@@ -187,11 +211,11 @@ def fetch_kernel01(manifest: list[tuple[str, str, str]], seen_hashes: set[str]) 
 
 
 def fetch_community_forensics(manifest: list[tuple[str, str, str]], seen_hashes: set[str]) -> None:
-    print("=== OwensLab/CommunityForensics-Eval (train split, face-gated) ===")
-    gate = get_face_gate()
-    real_count = ai_count = 0
+    print("=== OwensLab/CommunityForensics-Eval (train split) ===")
     real_kept = ai_kept = 0
     skipped_dupes = 0
+    real_gen_counts: dict[str, int] = {}
+    ai_gen_counts: dict[str, int] = {}
 
     for offset in CF_TRAIN_OFFSETS:
         if real_kept >= CF_TRAIN_TARGET_EACH and ai_kept >= CF_TRAIN_TARGET_EACH:
@@ -238,29 +262,32 @@ def fetch_community_forensics(manifest: list[tuple[str, str, str]], seen_hashes:
                 continue
 
             if label == 0 and real_kept < CF_TRAIN_TARGET_EACH:
-                gate_result = gate.run(img)
-                real_count += 1
-                if gate_result.status == "ok":
-                    seen_hashes.add(h)
-                    fn = REAL_DIR / f"cftrain_{real_kept:04d}.jpg"
-                    fn.write_bytes(encoded)
-                    manifest.append((str(fn.relative_to(ROOT)), "real", r.get("real_source") or "unknown"))
-                    real_kept += 1
+                gen = r.get("real_source") or "unknown"
+                if real_gen_counts.get(gen, 0) >= CF_TRAIN_PER_GENERATOR_CAP:
+                    continue
+                seen_hashes.add(h)
+                fn = REAL_DIR / f"cftrain_{real_kept:04d}.jpg"
+                fn.write_bytes(encoded)
+                manifest.append((str(fn.relative_to(ROOT)), "real", gen))
+                real_kept += 1
+                real_gen_counts[gen] = real_gen_counts.get(gen, 0) + 1
             elif label == 1 and ai_kept < CF_TRAIN_TARGET_EACH:
-                gate_result = gate.run(img)
-                ai_count += 1
-                if gate_result.status == "ok":
-                    seen_hashes.add(h)
-                    fn = AI_DIR / f"cftrain_{ai_kept:04d}.jpg"
-                    fn.write_bytes(encoded)
-                    manifest.append((str(fn.relative_to(ROOT)), "ai", model_name))
-                    ai_kept += 1
+                if ai_gen_counts.get(model_name, 0) >= CF_TRAIN_PER_GENERATOR_CAP:
+                    continue
+                seen_hashes.add(h)
+                fn = AI_DIR / f"cftrain_{ai_kept:04d}.jpg"
+                fn.write_bytes(encoded)
+                manifest.append((str(fn.relative_to(ROOT)), "ai", model_name))
+                ai_kept += 1
+                ai_gen_counts[model_name] = ai_gen_counts.get(model_name, 0) + 1
         print(
-            f"  offset={offset} real_seen={real_count} real_kept={real_kept}  "
-            f"ai_seen={ai_count} ai_kept={ai_kept}  skipped_dupes={skipped_dupes}"
+            f"  offset={offset} real_kept={real_kept}  ai_kept={ai_kept}  skipped_dupes={skipped_dupes}  "
+            f"ai_generators={dict(sorted(ai_gen_counts.items()))}"
         )
 
-    print(f"  DONE real_kept={real_kept} (of {real_count} seen)  ai_kept={ai_kept} (of {ai_count} seen)")
+    print(f"  DONE real_kept={real_kept}  ai_kept={ai_kept}")
+    print(f"  real generator breakdown: {dict(sorted(real_gen_counts.items()))}")
+    print(f"  ai generator breakdown: {dict(sorted(ai_gen_counts.items()))}")
 
 
 def main() -> None:
